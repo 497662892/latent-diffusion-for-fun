@@ -959,3 +959,220 @@ class EncoderUNetModel(nn.Module):
             h = h.type(x.dtype)
             return self.out(h)
 
+class TransformerEncoderBlock(TimestepBlock):
+    """
+    A transformer encoder block that applies a self-attention mechanism followed
+    by a feedforward neural network.
+    :param channels: the number of input channels.
+    :param emb_channels: the number of timestep embedding channels.
+    :param dropout: the rate of dropout.
+    :param use_checkpoint: if True, use gradient checkpointing on this module.
+    :param dims: determines if the signal is 1D, 2D, or 3D.
+    :param num_heads: the number of attention heads to use.
+    :param num_head_channels: if specified, the number of channels per attention head.
+    :param use_new_attention_order: if True, use a new attention order.
+    """
+
+    def __init__(
+        self,
+        channels,
+        emb_channels,
+        dropout,
+        use_checkpoint=False,
+        dims=2,
+        num_heads=1,
+        num_head_channels=-1,
+        use_new_attention_order=False,
+    ):
+        super().__init__()
+        self.channels = channels
+        self.emb_channels = emb_channels
+        self.dropout = dropout
+        self.use_checkpoint = use_checkpoint
+        self.dims = dims
+        self.num_heads = num_heads
+        self.num_head_channels = num_head_channels
+        self.use_new_attention_order = use_new_attention_order
+
+        self.norm1 = normalization(channels)
+        self.attn_block = AttentionBlock(
+            channels,
+            num_heads=num_heads,
+            num_head_channels=num_head_channels,
+            use_checkpoint=use_checkpoint,
+            use_new_attention_order=use_new_attention_order,
+        )
+        self.norm2 = normalization(channels)
+        self.mlp = nn.Sequential(
+            conv_nd(dims, channels, channels * 4, 1),
+            nn.GELU(),
+            conv_nd(dims, channels * 4, channels, 1),
+            nn.Dropout(dropout),
+        )
+        self.proj_out = zero_module(conv_nd(dims, channels, channels, 1))
+
+    def forward(self, x, timestep_embedding):
+        x = x + timestep_embedding[:, :, None, None, None]  # add timestep embedding
+        x = self.norm1(x)
+        x = x + self.attn_block(x)
+        x = x + self.mlp(self.norm2(x))
+        return self.proj_out(x)
+
+class TransformerDecoderBlock(TimestepBlock):
+    """
+    A transformer decoder block that applies a masked self-attention mechanism,
+    followed by an encoder-decoder attention mechanism and a feedforward neural network.
+    :param channels: the number of input channels.
+    :param emb_channels: the number of timestep embedding channels.
+    :param dropout: the rate of dropout.
+    :param use_checkpoint: if True, use gradient checkpointing on this module.
+    :param dims: determines if the signal is 1D, 2D, or 3D.
+    :param num_heads: the number of attention heads to use.
+    :param num_head_channels: if specified, the number of channels per attention head.
+    :param use_new_attention_order: if True, use a new attention order.
+    """
+
+    def __init__(
+        self,
+        channels,
+        emb_channels,
+        dropout,
+        use_checkpoint=False,
+        dims=2,
+        num_heads=1,
+        num_head_channels=-1,
+        use_new_attention_order=False,
+    ):
+        super().__init__()
+        self.channels = channels
+        self.emb_channels = emb_channels
+        self.dropout = dropout
+        self.use_checkpoint = use_checkpoint
+        self.dims = dims
+        self.num_heads = num_heads
+        self.num_head_channels = num_head_channels
+        self.use_new_attention_order = use_new_attention_order
+
+        self.norm1 = normalization(channels)
+        self.attn_block1 = AttentionBlock(
+            channels,
+            num_heads=num_heads,
+            num_head_channels=num_head_channels,
+            use_checkpoint=use_checkpoint,
+            use_new_attention_order=use_new_attention_order,
+        )
+        self.norm2 = normalization(channels)
+        self.attn_block2 = AttentionBlock(
+            channels,
+            num_heads=num_heads,
+            num_head_channels=num_head_channels,
+            use_checkpoint=use_checkpoint,
+            use_new_attention_order=use_new_attention_order,
+        )
+        self.norm3 = normalization(channels)
+        self.mlp = nn.Sequential(
+            conv_nd(dims, channels, channels * 4, 1),
+            nn.GELU(),
+            conv_nd(dims, channels * 4, channels, 1),
+            nn.Dropout(dropout),
+        )
+        self.proj_out = zero_module(conv_nd(dims, channels, channels, 1))
+
+    def forward(self, x, encoder_output, timestep_embedding, mask=None):
+        x = x + timestep_embedding[:, :, None, None, None]  # add timestep embedding
+        x = self.norm1(x)
+        x = x + self.attn_block1(x, mask=mask)
+        x = x + self.attn_block2(x, encoder_output)
+        x = x + self.mlp(self.norm3(x))
+        return self.proj_out(x)
+
+class TransformerModel(nn.Module):
+    """
+    A transformer model that consists of a series of encoder and decoder blocks.
+    :param in_channels: the number of input channels.
+    :param out_channels: the number of output channels.
+    :param num_blocks: the number of transformer encoder and decoder blocks to use.
+    :param emb_channels: the number of timestep embedding channels.
+    :param dropout: the rate of dropout.
+    :param use_checkpoint: if True, use gradient checkpointing on this module.
+    :param dims: determines if the signal is 1D, 2D, or 3D.
+    :param num_heads: the number of attention heads to use.
+    :param num_head_channels: if specified, the number of channels per attention head.
+    :param use_new_attention_order: if True, use a new attention order.
+    """
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        num_blocks,
+        emb_channels,
+        dropout,
+        use_checkpoint=False,
+        dims=2,
+        num_heads=1,
+        num_head_channels=-1,
+        use_new_attention_order=False,
+    ):
+        super().__init__()
+
+        # Encoder blocks
+        self.encoders = nn.ModuleList()
+        for i in range(num_blocks):
+            self.encoders.append(
+                TransformerEncoderBlock(
+                    in_channels if i == 0 else out_channels,
+                    emb_channels,
+                    dropout,
+                    use_checkpoint,
+                    dims,
+                    num_heads,
+                    num_head_channels,
+                    use_new_attention_order,
+                )
+            )
+
+        # Decoder blocks
+        self.decoders = nn.ModuleList()
+        for i in range(num_blocks):
+            self.decoders.append(
+                TransformerDecoderBlock(
+                    out_channels,
+                    emb_channels,
+                    dropout,
+                    use_checkpoint,
+                    dims,
+                    num_heads,
+                    num_head_channels,
+                    use_new_attention_order,
+                )
+            )
+
+        # Output convolutional layer
+        self.output_conv = conv_nd(dims, out_channels, out_channels, 1)
+
+    def forward(self, x, timestep_embedding, encoder_outputs=None, masks=None):
+        """
+        :param x: the input tensor.
+        :param timestep_embedding: the timestep embedding tensor.
+        :param encoder_outputs: a list of encoder output tensors.
+        :param masks: a list of masks for the decoder blocks.
+        """
+        if encoder_outputs is None:
+            encoder_outputs = []
+            for encoder in self.encoders:
+                x = encoder(x, timestep_embedding)
+                encoder_outputs.append(x)
+        else:
+            for i, encoder in enumerate(self.encoders):
+                x = encoder(x, timestep_embedding)
+                encoder_outputs[i] = x
+
+        if masks is None:
+            masks = [None] * len(self.decoders)
+
+        for i, decoder in reversed(list(enumerate(self.decoders))):
+            x = decoder(x, encoder_outputs[i], timestep_embedding, mask=masks[i])
+
+        x = self.output_conv(x)
+        return x
