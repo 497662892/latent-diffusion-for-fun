@@ -14,7 +14,8 @@ import logging
 import time
 import sys
 from config import data_path
-from extract_f0 import get_bin_index
+import librosa
+
 
 class SingVoice(Dataset):
     def __init__(self, data_path, dataset, dataset_type,padding_size = 800):
@@ -132,7 +133,23 @@ class SingVoice(Dataset):
 
 
 
-
+def get_bin_index(f0, n_bins=300, m = "C2", M = "C7"):
+    """
+    Args:
+        f0: tensor whose shpae is (N, frame_len)
+    Returns:
+        index: tensor whose shape is same to f0
+    """
+    # Set normal index in [1, n_bins - 1]
+    m = librosa.note_to_hz(m)
+    M = librosa.note_to_hz(M)
+    
+    width = (M + 1e-7 - m) / (n_bins - 1)
+    index = (f0 - m) // width + 1
+    # Set unvoiced frames as 0
+    index[torch.where(f0 == 0)] = 0
+    # Therefore, the vocabulary is [0, n_bins- 1], whose size is n_bins
+    return torch.as_tensor(index, dtype=torch.long, device=f0.device)
 
 
 
