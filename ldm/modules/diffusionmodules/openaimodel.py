@@ -1147,32 +1147,70 @@ class TransformerModel(nn.Module):
                     use_new_attention_order,
                 )
             )
-
+        self.emb_channels = emb_channels
         # Output convolutional layer
-        self.output_conv = conv_nd(dims, out_channels, out_channels, 1)
+        self.output_conv = nn.Sequential(
+            th.transpose(1, 2),
+            conv_nd(dims, emb_channels, out_channels, 1),
+            th.transpose(1, 2),
+        )
+        # encoder for conditions
+        self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
+        self.ppg_proj = nn.Sequential(   #reduce the number of channel of ppg
+            nn.Transpose(1, 2),  # 交换第二和第三个维度
+            nn.Conv1d(1024, emb_channels, 1),
+            nn.SiLU(),
+            nn.Conv1d(emb_channels, emb_channels, 1),
+            nn.Transpose(1, 2),  # 交换第二和第三个维度
+        )
+        self.condition_fusion = nn.Sequential(  #fusion of two condition
+            nn.Transpose(1, 2),  # 交换第二和第三个维度
+            nn.Conv1d(emb_channels * 2, emb_channels, 1),
+            nn.SiLU(),
+            nn.Conv1d(emb_channels, emb_channels, 1),
+            nn.Transpose(1,2)   #恢复原样
+        )
+        
+        self.time_embed = nn.Sequential(
+            linear(emb_channels, emb_channels),
+            nn.SiLU(),
+            linear(emb_channels, emb_channels),
+        )
 
-    def forward(self, x, timestep_embedding, encoder_outputs=None, masks=None):
+    def forward(self, x, t = None, cond = None):
         """
         :param x: the input tensor.
         :param timestep_embedding: the timestep embedding tensor.
         :param encoder_outputs: a list of encoder output tensors.
         :param masks: a list of masks for the decoder blocks.
         """
-        if encoder_outputs is None:
-            encoder_outputs = []
-            for encoder in self.encoders:
-                x = encoder(x, timestep_embedding)
-                encoder_outputs.append(x)
-        else:
-            for i, encoder in enumerate(self.encoders):
-                x = encoder(x, timestep_embedding)
-                encoder_outputs[i] = x
+        x = th.squeeze(x, 1) # remove channel dimension [B, 1, T, D] -> [B, T, D]
+        f0_emb = self.f0_embeding(cond["f0"]) #from [B, T, 1] to [B, T, emb_channels]
+        ppg_emb = self.ppg_proj(cond["whisper"]) # from [B, T, 1024] to [B, T, emb_channels]
+        conditions = th.cat([f0_emb, ppg_emb], dim = 2)
+        conditions = self.condition_fusion(conditions)
+        
+        step_emb = timestep_embedding(t,dim = self.emb_channels, repeat_only= False)  #get the original timestep embing [B,D] 
+        t_emb = self.time_embed(step_emb)  #update the timestep embeding
+        
+        
+        
+        # if encoder_outputs is None:
+        #     encoder_outputs = []
+        #     for encoder in self.encoders:
+        #         x = encoder(x, timestep_embedding)
+        #         encoder_outputs.append(x)
+        # else:
+        #     for i, encoder in enumerate(self.encoders):
+        #         x = encoder(x, timestep_embedding)
+        #         encoder_outputs[i] = x
 
-        if masks is None:
-            masks = [None] * len(self.decoders)
+        mask = cond["mask"]
 
         for i, decoder in reversed(list(enumerate(self.decoders))):
-            x = decoder(x, encoder_outputs[i], timestep_embedding, mask=masks[i])
+            x = decoder(x, conditions, t_emb, mask=mask)
 
         x = self.output_conv(x)
+        x = th.unsqueeze(x, 1)  # add channel dimension [B, T, D] -> [B, 1, T, D]
+        
         return x

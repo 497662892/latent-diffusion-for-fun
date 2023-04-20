@@ -23,24 +23,6 @@ model:
         lr_max: 0.1
         lr_min: 0.00001
     unet_config:  #改成transformer的
-      # target: ldm.modules.diffusionmodules.openaimodel.UNetModel
-      # params:
-      #   image_size: 64
-      #   in_channels: 6 
-      #   out_channels: 3
-      #   model_channels: 128
-      #   attention_resolutions:
-      #   - 8
-      #   - 4
-      #   - 2
-      #   num_res_blocks: 2
-      #   channel_mult:
-      #   - 1
-      #   - 2
-      #   - 3
-      #   - 4
-      #   num_heads: 8
-      #   resblock_updown: true
       target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
       params:
         in_channels: 6 
