@@ -41,6 +41,16 @@ model:
       #   - 4
       #   num_heads: 8
       #   resblock_updown: true
+      target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
+      params:
+        in_channels: 6 
+        out_channels: 3
+        num_blocks: 3
+        emb_channels: 128
+        dropout: 0.0
+        dims: 3
+        num_heads: 8
+        use_new_attention_order: True
     first_stage_config:
       target: ldm.models.autoencoder.VQModelInterface
       params:
