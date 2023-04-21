@@ -1057,10 +1057,10 @@ class TransformerDecoderBlock(TimestepBlock):
         
         self.in_layer = nn.Sequential(
             nn.LayerNorm(emb_channels),
-            th.transpose(1,2),
+            Transpose(1,2),
             nn.SiLU(),
             nn.Conv1d(emb_channels, emb_channels, 1),
-            th.transpose(1,2)
+            Transpose(1,2)
         )
         
         self.emb_layer = nn.Sequential(
@@ -1070,11 +1070,11 @@ class TransformerDecoderBlock(TimestepBlock):
         
         self.out_layer = nn.Sequential(
             nn.LayerNorm(emb_channels),
-            th.transpose(1,2),
+            Transpose(1,2),
             nn.SiLU,
             nn.Dropout(p=dropout),
             nn.Conv1d(emb_channels, emb_channels, 1),
-            th.transpose(1,2)
+            Transpose(1,2)
         )
             
         self.decoder = BasicTransformerBlock(dim=emb_channels, n_heads= num_heads, d_head= emb_channels//num_heads, 
@@ -1125,15 +1125,15 @@ class TransformerDecoderBlock(TimestepBlock):
         x = self.decoder(x, cond, mask=mask)
         return x
 
-# class Transpose(nn.Module):
-#     "inplement the torch.transpose in neural network"
-#     def __init__(self, dim0, dim1):
-#         super(Transpose,self).__init__()
-#         self.dim0 = dim0
-#         self.dim1 = dim1
+class Transpose(nn.Module):
+    "inplement the torch.transpose in neural network"
+    def __init__(self, dim0, dim1):
+        super(Transpose,self).__init__()
+        self.dim0 = dim0
+        self.dim1 = dim1
         
-#     def forward(self, x):
-#         return th.transpose(x, self.dim0, self.dim1)
+    def forward(self, x):
+        return th.transpose(x, self.dim0, self.dim1)
 
 class TransformerModel(nn.Module):
     """
@@ -1199,9 +1199,9 @@ class TransformerModel(nn.Module):
         self.emb_channels = emb_channels
         # Output convolutional layer
         self.output_conv = nn.Sequential(
-            th.transpose(1, 2),
+            Transpose(1, 2),
             conv_nd(dims, emb_channels, out_channels, 1),
-            th.transpose(1, 2),
+            Transpose(1, 2),
         )
         # encoder for conditions
         self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
@@ -1211,11 +1211,11 @@ class TransformerModel(nn.Module):
             nn.Linear(emb_channels, emb_channels),
         )
         self.condition_fusion = nn.Sequential(  #fusion of two condition
-            th.transpose(1, 2),  # 交换第二和第三个维度
+            Transpose(1, 2),  # 交换第二和第三个维度
             nn.Conv1d(emb_channels * 2, emb_channels, 1),
             nn.SiLU(),
             nn.Conv1d(emb_channels, emb_channels, 1),
-            th.transpose(1,2)   #恢复原样
+            Transpose(1,2)   #恢复原样
         )
         
         self.time_embed = nn.Sequential(
@@ -1225,9 +1225,9 @@ class TransformerModel(nn.Module):
         )
         
         self.input_proj = nn.Sequential(
-            th.transpose(1,2),
+            Transpose(1,2),
             nn.Conv1d(in_channels, emb_channels, 1),
-            th.transpose(1,2)
+            Transpose(1,2)
         )
 
     def forward(self, x, t = None, cond = None):
