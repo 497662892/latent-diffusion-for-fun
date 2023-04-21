@@ -29,7 +29,7 @@ model:
         out_channels: 10
         num_blocks: 3
         emb_channels: 256 #the dimension of the embedding space
-        dropout: 0.0
+        dropout: 0.1
         dims: 1
         num_heads: 8
         use_new_attention_order: True

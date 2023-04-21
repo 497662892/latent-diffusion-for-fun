@@ -1037,11 +1037,11 @@ class LatentDiffusion(DDPM):
         kl_prior = normal_kl(mean1=qt_mean, logvar1=qt_log_variance, mean2=0.0, logvar2=0.0)
         return mean_flat(kl_prior) / np.log(2.0)
 
-    def p_losses(self, x_start, cond, t, noise=None):
+    def p_losses(self, x_start, cond, t, noise=None, mask = None):
         if cond.get("mask", None) is not None:
             mask = cond["mask"]
-            mask = torch.unsqueeze(mask, 1)
-            mask = mask.repeat(1, 1, 1, x_start.shape[-1])
+            mask = torch.unsqueeze(mask, 1) # (B, 1, T, 1)
+            mask = mask.repeat(1, 1, 1, x_start.shape[-1]) # (B, 1, T, C)
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         model_output = self.apply_model(x_noisy, t, cond)
@@ -1056,8 +1056,9 @@ class LatentDiffusion(DDPM):
         else:
             raise NotImplementedError()
         
-        target = target * mask
-        model_output = model_output * mask
+        if mask != None:
+            target = target * mask
+            model_output = model_output * mask
         
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
