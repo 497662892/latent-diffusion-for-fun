@@ -44,7 +44,7 @@ model:
           attn_type: none
           double_z: false
           z_channels: 3
-          resolution: 800 #no used
+          resolution: 40 #no used
           in_channels: 3
           out_ch: 3
           ch: 128
@@ -69,14 +69,14 @@ data:
       train:
           target: ldm.data.singvoice.SingVoice
           params:
-              datapath: D:\math\NLP\project\Singing-Voice-Conversion-BingliangLi\preprocess
-              data_type: train
+              data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+              dataset_type: train
               dataset: Opencpop
       validation:
           target: ldm.data.singvoice.SingVoice
           params:
-              datapath: D:\math\NLP\project\Singing-Voice-Conversion-BingliangLi\preprocess
-              data_type: test
+              data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+              dataset_type: test
               dataset: Opencpop
 
 lightning:

@@ -12,8 +12,6 @@ import torch
 import os
 import logging
 import time
-import sys
-from config import data_path
 import librosa
 
 
@@ -21,14 +19,14 @@ class SingVoice(Dataset):
     def __init__(self, data_path, dataset, dataset_type,padding_size = 800):
         self.dataset_type = dataset_type
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+        self.padding_size = padding_size
         self.dataset_dir = os.path.join(data_path, dataset)
 
         logging.info("\n" + "=" * 20 + "\n")
         logging.info("{} Dataset".format(dataset_type))
         self.loading_data()
         logging.info("\n" + "=" * 20 + "\n")
-        self.padding_size = padding_size
+        
 
     def loading_whisper(self):
         logging.info("Loading Whisper features...")
@@ -42,14 +40,7 @@ class SingVoice(Dataset):
                 len(self.whisper), self.whisper[0].shape
             )
         )
-        self.whisper_dim = self.whisper[0].shape[1]
-        #padding for whisper based on mask
-        for i in range(len(self.whisper)):
-            whisper = self.whisper[i]
-            whisper_gt = torch.zeros((self.padding_size, self.whisper_dim), device=self.device, dtype=torch.float)
-            sz = min(self.padding_size, len(whisper))
-            whisper_gt[:sz] = torch.as_tensor(whisper[:sz], device=self.device)
-            self.whisper[i] = whisper_gt
+        
             
             
     def loading_MCEP(self):
@@ -84,20 +75,15 @@ class SingVoice(Dataset):
             "rb",
         ) as f:
             self.f0 = pickle.load(f)
-            self.f0 = torch.as_tensor(self.f0, device=self.device)
-            self.f0 = get_bin_index(self.f0) # convert to bin index
+            print('the shape of f0 is', len(self.f0)) #for debug
+            
+            
         logging.info(
             "f0: sz = {}, shape = {}".format(
                 len(self.whisper), self.f0[0].shape
             )
         )
         
-        for i in range(len(self.f0)):
-            f0 = self.f0[i]
-            f0_gt = torch.zeros((self.padding_size, 1), device=self.device, dtype=torch.float)
-            sz = min(self.padding_size, len(f0))
-            f0_gt[:sz] = torch.as_tensor(f0[:sz], device=self.device)
-            self.f0[i] = f0_gt
 
     def loading_data(self):
         t = time.time()
@@ -113,7 +99,20 @@ class SingVoice(Dataset):
 
     def __getitem__(self, idx):
         # y_gt, mask = self.get_padding_y_gt(idx)
-        sample = {"id":idx, "MECP":self.y_gt[idx], "mask":self.y_mask[idx], "f0":self.f0[idx], "whisper":self.whisper[idx]}
+        whisper = self.whisper[idx]
+        f0 = self.f0[idx]
+        
+        self.whisper_dim = self.whisper[0].shape[1]
+        whisper_gt = torch.zeros((self.padding_size, self.whisper_dim), device=self.device, dtype=torch.float)
+        f0_gt = torch.zeros((self.padding_size, 1), device=self.device, dtype=torch.float)
+        
+        sz = min(self.padding_size, len(whisper))
+        
+        whisper_gt[:sz] = torch.as_tensor(whisper[:sz], device=self.device)
+        f0_gt = torch.as_tensor(f0[:sz], device=self.device)
+        f0_gt = get_bin_index(f0_gt) # convert to bin index
+        
+        sample = {"id":idx, "MECP":self.y_gt[idx], "mask":self.y_mask[idx], "f0":f0_gt, "whisper":whisper_gt}
         return sample
 
     def get_padding_y_gt(self, idx):

@@ -8,6 +8,7 @@ import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 from ldm.modules.diffusionmodules.util import (
     checkpoint,
     conv_nd,
@@ -1071,7 +1072,7 @@ class TransformerDecoderBlock(TimestepBlock):
         self.out_layer = nn.Sequential(
             nn.LayerNorm(emb_channels),
             Transpose(1,2),
-            nn.SiLU,
+            nn.SiLU(),
             nn.Dropout(p=dropout),
             nn.Conv1d(emb_channels, emb_channels, 1),
             Transpose(1,2)
