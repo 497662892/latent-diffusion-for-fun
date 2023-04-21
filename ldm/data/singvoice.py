@@ -20,6 +20,7 @@ import librosa
 class SingVoice(Dataset):
     def __init__(self, data_path, dataset, dataset_type,padding_size = 800):
         self.dataset_type = dataset_type
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.dataset_dir = os.path.join(data_path, dataset)
 
@@ -45,11 +46,10 @@ class SingVoice(Dataset):
         #padding for whisper based on mask
         for i in range(len(self.whisper)):
             whisper = self.whisper[i]
-            whisper_gt = torch.zeros((self.padding_size, self.whisper_dim), device=self.args.device, dtype=torch.float)
+            whisper_gt = torch.zeros((self.padding_size, self.whisper_dim), device=self.device, dtype=torch.float)
             sz = min(self.padding_size, len(whisper))
-            whisper_gt[:sz] = torch.as_tensor(whisper[:sz], device=self.args.device)
-            
-        self.whisper = whisper_gt
+            whisper_gt[:sz] = torch.as_tensor(whisper[:sz], device=self.device)
+            self.whisper[i] = whisper_gt
             
             
     def loading_MCEP(self):
@@ -67,10 +67,10 @@ class SingVoice(Dataset):
         # Padding
         sz = len(self.mcep)
         self.y_gt = torch.zeros(
-            (sz, self.padding_size, self.y_d), device=self.args.device, dtype=torch.float
+            (sz, self.padding_size, self.y_d), device=self.device, dtype=torch.float
         )
         self.y_mask = torch.zeros(
-            (sz, self.padding_size, 1), device=self.args.device, dtype=torch.long
+            (sz, self.padding_size, 1), device=self.device, dtype=torch.long
         )
         for idx in range(sz):
             y, mask = self.get_padding_y_gt(idx)
@@ -84,6 +84,7 @@ class SingVoice(Dataset):
             "rb",
         ) as f:
             self.f0 = pickle.load(f)
+            self.f0 = torch.as_tensor(self.f0, device=self.device)
             self.f0 = get_bin_index(self.f0) # convert to bin index
         logging.info(
             "f0: sz = {}, shape = {}".format(
@@ -93,11 +94,10 @@ class SingVoice(Dataset):
         
         for i in range(len(self.f0)):
             f0 = self.f0[i]
-            f0_gt = torch.zeros((self.padding_size, 1), device=self.args.device, dtype=torch.float)
+            f0_gt = torch.zeros((self.padding_size, 1), device=self.device, dtype=torch.float)
             sz = min(self.padding_size, len(f0))
-            f0_gt[:sz] = torch.as_tensor(f0[:sz], device=self.args.device)
-            
-        self.f0 = f0_gt
+            f0_gt[:sz] = torch.as_tensor(f0[:sz], device=self.device)
+            self.f0[i] = f0_gt
 
     def loading_data(self):
         t = time.time()
@@ -118,15 +118,15 @@ class SingVoice(Dataset):
 
     def get_padding_y_gt(self, idx):
         y_gt = torch.zeros(
-            (self.padding_size, self.y_d), device=self.args.device, dtype=torch.float
+            (self.padding_size, self.y_d), device=self.device, dtype=torch.float
         )
         mask = torch.ones(
-            (self.padding_size, 1), device=self.args.device, dtype=torch.long
+            (self.padding_size, 1), device=self.device, dtype=torch.long
         )
 
         mcep = self.mcep[idx]
         sz = min(self.padding_size, len(mcep))
-        y_gt[:sz] = torch.as_tensor(mcep[:sz], device=self.args.device)
+        y_gt[:sz] = torch.as_tensor(mcep[:sz], device=self.device)
         mask[sz:] = 0
 
         return y_gt, mask
