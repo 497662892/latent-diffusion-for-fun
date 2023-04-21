@@ -1018,6 +1018,122 @@ class TransformerEncoderBlock(TimestepBlock):
         x = x + self.mlp(self.norm2(x))
         return self.proj_out(x)
 
+
+class ResBlock(TimestepBlock):
+    """
+    A residual block that can optionally change the number of channels.
+    :param channels: the number of input channels.
+    :param emb_channels: the number of timestep embedding channels.
+    :param dropout: the rate of dropout.
+    :param out_channels: if specified, the number of out channels.
+    :param use_conv: if True and out_channels is specified, use a spatial
+        convolution instead of a smaller 1x1 convolution to change the
+        channels in the skip connection.
+    :param dims: determines if the signal is 1D, 2D, or 3D.
+    :param use_checkpoint: if True, use gradient checkpointing on this module.
+    :param up: if True, use this block for upsampling.
+    :param down: if True, use this block for downsampling.
+    """
+
+    def __init__(
+        self,
+        channels,
+        emb_channels,
+        dropout,
+        out_channels=None,
+        use_conv=False,
+        use_scale_shift_norm=False,
+        dims=2,
+        use_checkpoint=False,
+        up=False,
+        down=False,
+    ):
+        super().__init__()
+        self.channels = channels
+        self.emb_channels = emb_channels
+        self.dropout = dropout
+        self.out_channels = out_channels or channels
+        self.use_conv = use_conv
+        self.use_checkpoint = use_checkpoint
+        self.use_scale_shift_norm = use_scale_shift_norm
+
+        self.in_layers = nn.Sequential(
+            normalization(channels),
+            nn.SiLU(),
+            conv_nd(dims, channels, self.out_channels, 3, padding=1),
+        )
+
+        self.updown = up or down
+
+        if up:
+            self.h_upd = Upsample(channels, False, dims)
+            self.x_upd = Upsample(channels, False, dims)
+        elif down:
+            self.h_upd = Downsample(channels, False, dims)
+            self.x_upd = Downsample(channels, False, dims)
+        else:
+            self.h_upd = self.x_upd = nn.Identity()
+
+        self.emb_layers = nn.Sequential(
+            nn.SiLU(),
+            linear(
+                emb_channels,
+                2 * self.out_channels if use_scale_shift_norm else self.out_channels,
+            ),
+        )
+        self.out_layers = nn.Sequential(
+            normalization(self.out_channels),
+            nn.SiLU(),
+            nn.Dropout(p=dropout),
+            zero_module(
+                conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1)
+            ),
+        )
+
+        if self.out_channels == channels:
+            self.skip_connection = nn.Identity()
+        elif use_conv:
+            self.skip_connection = conv_nd(
+                dims, channels, self.out_channels, 3, padding=1
+            )
+        else:
+            self.skip_connection = conv_nd(dims, channels, self.out_channels, 1)
+
+    def forward(self, x, emb):
+        """
+        Apply the block to a Tensor, conditioned on a timestep embedding.
+        :param x: an [N x C x ...] Tensor of features.
+        :param emb: an [N x emb_channels] Tensor of timestep embeddings.
+        :return: an [N x C x ...] Tensor of outputs.
+        """
+        return checkpoint(
+            self._forward, (x, emb), self.parameters(), self.use_checkpoint
+        )
+
+
+    def _forward(self, x, emb):
+        if self.updown:
+            in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
+            h = in_rest(x)
+            h = self.h_upd(h)
+            x = self.x_upd(x)
+            h = in_conv(h)
+        else:
+            h = self.in_layers(x)
+        emb_out = self.emb_layers(emb).type(h.dtype)
+        while len(emb_out.shape) < len(h.shape):
+            emb_out = emb_out[..., None]
+        if self.use_scale_shift_norm:
+            out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
+            scale, shift = th.chunk(emb_out, 2, dim=1)
+            h = out_norm(h) * (1 + scale) + shift
+            h = out_rest(h)
+        else:
+            h = h + emb_out
+            h = self.out_layers(h)
+        return self.skip_connection(x) + h
+
+
 class TransformerDecoderBlock(TimestepBlock):
     """
     A transformer decoder block that applies a masked self-attention mechanism,
@@ -1038,7 +1154,7 @@ class TransformerDecoderBlock(TimestepBlock):
         emb_channels,
         dropout,
         use_checkpoint=False,
-        dims=2,
+        dims=1,
         num_heads=1,
         num_head_channels=-1,
         use_new_attention_order=False,
@@ -1052,8 +1168,33 @@ class TransformerDecoderBlock(TimestepBlock):
         self.num_heads = num_heads
         self.num_head_channels = num_head_channels
         self.use_new_attention_order = use_new_attention_order
+        
+        self.in_layer = nn.Sequential(
+            nn.LayerNorm(emb_channels),
+            th.transpose(1,2),
+            nn.SiLU(),
+            nn.Conv1d(emb_channels, channels, 1),
+            th.transpose(1,2)
+        )
+        
+        self.emb_layer = nn.Sequential(
+            th.transpose(1,2),
+            nn.SiLU(),
+            nn.Conv1d(emb_channels, emb_channels, 1),
+            th.transpose(1,2)
+        )
+        
+        self.out_layer = nn.Sequential(
+            nn.LayerNorm(emb_channels),
+            th.transpose(1,2),
+            nn.SiLU,
+            nn.Dropout(p=dropout),
+            nn.Conv1d(emb_channels, emb_channels, 1),
+            th.transpose(1,2)
+        )
+            
 
-        self.norm1 = normalization(channels)
+        # self.norm1 = normalization(channels)
         self.attn_block1 = AttentionBlock(
             channels,
             num_heads=num_heads,
@@ -1061,7 +1202,9 @@ class TransformerDecoderBlock(TimestepBlock):
             use_checkpoint=use_checkpoint,
             use_new_attention_order=use_new_attention_order,
         )
-        self.norm2 = normalization(channels)
+        
+        # self.norm2 = normalization(channels)
+        
         self.attn_block2 = AttentionBlock(
             channels,
             num_heads=num_heads,
@@ -1069,22 +1212,45 @@ class TransformerDecoderBlock(TimestepBlock):
             use_checkpoint=use_checkpoint,
             use_new_attention_order=use_new_attention_order,
         )
-        self.norm3 = normalization(channels)
+        self.norm3 = nn.LayerNorm(emb_channels)
+        
         self.mlp = nn.Sequential(
-            conv_nd(dims, channels, channels * 4, 1),
+            th.transpose(1,2),
+            conv_nd(dims, emb_channels, emb_channels * 4, 1),
             nn.GELU(),
-            conv_nd(dims, channels * 4, channels, 1),
+            conv_nd(dims, emb_channels * 4, emb_channels, 1),
             nn.Dropout(dropout),
+            th.transpose(1,2)
         )
-        self.proj_out = zero_module(conv_nd(dims, channels, channels, 1))
+        
+        self.proj_out = nn.Sequential(
+            th.transpose(1,2),
+            zero_module(conv_nd(dims, emb_channels, emb_channels, 1)),
+            th.transpose(1,2)
+        )
 
     def forward(self, x, encoder_output, timestep_embedding, mask=None):
-        x = x + timestep_embedding[:, :, None, None, None]  # add timestep embedding
-        x = self.norm1(x)
-        x = x + self.attn_block1(x, mask=mask)
-        x = x + self.attn_block2(x, encoder_output)
+        #prepare the input with time_step embedding
+        timestep_embedding = th.unsqueeze(timestep_embedding, 1) #turn [B, D] to [B, 1, D]
+        h = self.in_layer(x) + self.emb_layer(timestep_embedding)
+        h = self.out_layer(h)
+        x = x + h
+        
+        #apply the attention block
+        x = x + self.attn_block1(x, mask=mask) #self attention
+        x = x + self.attn_block2(x, encoder_output) #encoder-decoder attention
         x = x + self.mlp(self.norm3(x))
         return self.proj_out(x)
+
+# class Transpose(nn.Module):
+#     "inplement the torch.transpose in neural network"
+#     def __init__(self, dim0, dim1):
+#         super(Transpose,self).__init__()
+#         self.dim0 = dim0
+#         self.dim1 = dim1
+        
+#     def forward(self, x):
+#         return th.transpose(x, self.dim0, self.dim1)
 
 class TransformerModel(nn.Module):
     """
@@ -1116,21 +1282,21 @@ class TransformerModel(nn.Module):
     ):
         super().__init__()
 
-        # Encoder blocks
-        self.encoders = nn.ModuleList()
-        for i in range(num_blocks):
-            self.encoders.append(
-                TransformerEncoderBlock(
-                    in_channels if i == 0 else out_channels,
-                    emb_channels,
-                    dropout,
-                    use_checkpoint,
-                    dims,
-                    num_heads,
-                    num_head_channels,
-                    use_new_attention_order,
-                )
-            )
+        # # Encoder blocks  #not used
+        # self.encoders = nn.ModuleList()
+        # for i in range(num_blocks):
+        #     self.encoders.append(
+        #         TransformerEncoderBlock(
+        #             in_channels if i == 0 else out_channels,
+        #             emb_channels,
+        #             dropout,
+        #             use_checkpoint,
+        #             dims,
+        #             num_heads,
+        #             num_head_channels,
+        #             use_new_attention_order,
+        #         )
+        #     )
 
         # Decoder blocks
         self.decoders = nn.ModuleList()
@@ -1157,24 +1323,30 @@ class TransformerModel(nn.Module):
         # encoder for conditions
         self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
         self.ppg_proj = nn.Sequential(   #reduce the number of channel of ppg
-            nn.Transpose(1, 2),  # 交换第二和第三个维度
+            th.transpose(1, 2),  # 交换第二和第三个维度
             nn.Conv1d(1024, emb_channels, 1),
             nn.SiLU(),
             nn.Conv1d(emb_channels, emb_channels, 1),
-            nn.Transpose(1, 2),  # 交换第二和第三个维度
+            th.transpose(1, 2),  # 交换第二和第三个维度
         )
         self.condition_fusion = nn.Sequential(  #fusion of two condition
-            nn.Transpose(1, 2),  # 交换第二和第三个维度
+            th.transpose(1, 2),  # 交换第二和第三个维度
             nn.Conv1d(emb_channels * 2, emb_channels, 1),
             nn.SiLU(),
             nn.Conv1d(emb_channels, emb_channels, 1),
-            nn.Transpose(1,2)   #恢复原样
+            th.transpose(1,2)   #恢复原样
         )
         
         self.time_embed = nn.Sequential(
             linear(emb_channels, emb_channels),
             nn.SiLU(),
             linear(emb_channels, emb_channels),
+        )
+        
+        self.input_proj = nn.Sequential(
+            th.transpose(1,2),
+            nn.Conv1d(in_channels, emb_channels, 1),
+            th.transpose(1,2)
         )
 
     def forward(self, x, t = None, cond = None):
@@ -1193,7 +1365,7 @@ class TransformerModel(nn.Module):
         step_emb = timestep_embedding(t,dim = self.emb_channels, repeat_only= False)  #get the original timestep embing [B,D] 
         t_emb = self.time_embed(step_emb)  #update the timestep embeding
         
-        
+        x = self.input_proj(x)
         
         # if encoder_outputs is None:
         #     encoder_outputs = []
@@ -1208,7 +1380,7 @@ class TransformerModel(nn.Module):
         mask = cond["mask"]
 
         for i, decoder in reversed(list(enumerate(self.decoders))):
-            x = decoder(x, conditions, t_emb, mask=mask)
+            x = decoder(x, conditions, t_emb , mask=mask)
 
         x = self.output_conv(x)
         x = th.unsqueeze(x, 1)  # add channel dimension [B, T, D] -> [B, 1, T, D]

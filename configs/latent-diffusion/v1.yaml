@@ -25,12 +25,12 @@ model:
     unet_config:  #改成transformer的
       target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
       params:
-        in_channels: 6 
-        out_channels: 3
+        in_channels: 10  #the dimension of the latent space (from 40 to 10)
+        out_channels: 10
         num_blocks: 3
-        emb_channels: 128
+        emb_channels: 256 #the dimension of the embedding space
         dropout: 0.0
-        dims: 3
+        dims: 1
         num_heads: 8
         use_new_attention_order: True
     first_stage_config:
