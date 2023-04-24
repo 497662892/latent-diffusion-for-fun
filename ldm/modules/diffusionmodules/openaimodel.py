@@ -1151,6 +1151,7 @@ class TransformerModel(nn.Module):
         )
         # encoder for conditions
         self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
+        self.timestep_embeding = nn.Embedding(1000, emb_channels)  #emb the timestep into [B,T,D]
         self.ppg_proj = nn.Sequential(   #reduce the number of channel of ppg
             nn.Linear(1024, emb_channels),
             nn.SiLU(),
@@ -1194,14 +1195,12 @@ class TransformerModel(nn.Module):
         conditions = th.cat([f0_emb, ppg_emb], dim = 2)
         conditions = self.condition_fusion(conditions)
         
-        print("The device of x is ", x.device)
-        print("The device of conditions is ", f0_emb.device)
-        print("The device of ppg_emb is ", ppg_emb.device)
         print("The device of t is ", t.device)
         
-        print("the shape of time is ", t.shape)
-        print("the channel is ", self.emb_channels)
-        step_emb = timestep_embedding(timesteps = t,dim = self.emb_channels)  #get the original timestep embing [B,D] 
+        #t is [B] to [B, 1]
+        t = th.unsqueeze(t, 1)
+        step_emb = self.timestep_embeding(t)  #get the original timestep embing [B,D] 
+        
         print("the shape of step_emb is ", step_emb.shape)
         t_emb = self.time_embed(step_emb)  #update the timestep embeding
         print("the shape of t_emb is ", t_emb.shape) # for debug
@@ -1210,7 +1209,7 @@ class TransformerModel(nn.Module):
         mask = th.squeeze(context["mask"],-1) #[B, T, 1] to [B, T]
 
         for i, decoder in reversed(list(enumerate(self.decoders))):
-            x = decoder(x, conditions, t_emb , mask=mask)
+            x = decoder(x, cond = conditions, t_emb=t_emb , mask=mask)
 
         x = self.output_conv(x)
         x = th.unsqueeze(x, 1)  # add channel dimension [B, T, D] -> [B, 1, T, D]
