@@ -1058,10 +1058,8 @@ class TransformerDecoderBlock(TimestepBlock):
         
         self.in_layer = nn.Sequential(
             nn.LayerNorm(emb_channels),
-            Transpose(1,2),
             nn.SiLU(),
-            nn.Conv1d(emb_channels, emb_channels, 1),
-            Transpose(1,2)
+            nn.Linear(emb_channels, emb_channels),
         )
         
         self.emb_layer = nn.Sequential(
@@ -1071,54 +1069,19 @@ class TransformerDecoderBlock(TimestepBlock):
         
         self.out_layer = nn.Sequential(
             nn.LayerNorm(emb_channels),
-            Transpose(1,2),
             nn.SiLU(),
             nn.Dropout(p=dropout),
-            nn.Conv1d(emb_channels, emb_channels, 1),
-            Transpose(1,2)
+            nn.Linear(emb_channels, emb_channels),
         )
             
         self.decoder = BasicTransformerBlock(dim=emb_channels, n_heads= num_heads, d_head= emb_channels//num_heads, 
                                              dropout=dropout, context_dim=emb_channels)
-        # self.norm1 = normalization(channels)
-        # self.attn_block1 = AttentionBlock(
-        #     channels,
-        #     num_heads=num_heads,
-        #     num_head_channels=num_head_channels,
-        #     use_checkpoint=use_checkpoint,
-        #     use_new_attention_order=use_new_attention_order,
-        # )
-        
-        # self.norm2 = normalization(channels)
-        
-        # self.attn_block2 = AttentionBlock(
-        #     channels,
-        #     num_heads=num_heads,
-        #     num_head_channels=num_head_channels,
-        #     use_checkpoint=use_checkpoint,
-        #     use_new_attention_order=use_new_attention_order,
-        # )
-        # self.norm3 = nn.LayerNorm(emb_channels)
-        
-        # self.mlp = nn.Sequential(
-        #     th.transpose(1,2),
-        #     conv_nd(dims, emb_channels, emb_channels * 4, 1),
-        #     nn.GELU(),
-        #     conv_nd(dims, emb_channels * 4, emb_channels, 1),
-        #     nn.Dropout(dropout),
-        #     th.transpose(1,2)
-        # )
-        
-        # self.proj_out = nn.Sequential(
-        #     th.transpose(1,2),
-        #     zero_module(conv_nd(dims, emb_channels, emb_channels, 1)),
-        #     th.transpose(1,2)
-        # )
+
 
     def forward(self, x, cond, t_emb, mask=None):
         #prepare the input with time_step embedding
         t_emb = th.unsqueeze(t_emb, 1) #turn [B, D] to [B, 1, D]
-        h = self.in_layer(x) + self.emb_layer(t_emb)
+        h = self.in_layer(x) + self.emb_layer(t_emb)  # [B, T, D]
         h = self.out_layer(h)
         x = x + h
         
@@ -1166,22 +1129,6 @@ class TransformerModel(nn.Module):
     ):
         super().__init__()
 
-        # # Encoder blocks  #not used
-        # self.encoders = nn.ModuleList()
-        # for i in range(num_blocks):
-        #     self.encoders.append(
-        #         TransformerEncoderBlock(
-        #             in_channels if i == 0 else out_channels,
-        #             emb_channels,
-        #             dropout,
-        #             use_checkpoint,
-        #             dims,
-        #             num_heads,
-        #             num_head_channels,
-        #             use_new_attention_order,
-        #         )
-        #     )
-
         # Decoder blocks
         self.decoders = nn.ModuleList()
         for i in range(num_blocks):
@@ -1200,9 +1147,7 @@ class TransformerModel(nn.Module):
         self.emb_channels = emb_channels
         # Output convolutional layer
         self.output_conv = nn.Sequential(
-            Transpose(1, 2),
-            conv_nd(dims, emb_channels, out_channels, 1),
-            Transpose(1, 2),
+            nn.Linear(emb_channels, out_channels),
         )
         # encoder for conditions
         self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
@@ -1211,27 +1156,25 @@ class TransformerModel(nn.Module):
             nn.SiLU(),
             nn.Linear(emb_channels, emb_channels),
         )
-        self.condition_fusion = nn.Sequential(  #fusion of two condition
-            Transpose(1, 2),  # 交换第二和第三个维度
-            nn.Conv1d(emb_channels * 2, emb_channels, 1),
+        self.condition_fusion = nn.Sequential(  #fusion of two condition 
+            nn.Linear(emb_channels * 2, emb_channels),
             nn.SiLU(),
-            nn.Conv1d(emb_channels, emb_channels, 1),
-            Transpose(1,2)   #恢复原样
+            nn.Linear(emb_channels, emb_channels),
         )
         
         self.time_embed = nn.Sequential(
-            linear(emb_channels, emb_channels),
+            nn.Linear(emb_channels, emb_channels),
             nn.SiLU(),
-            linear(emb_channels, emb_channels),
+            nn.Linear(emb_channels, emb_channels),
         )
         
         self.input_proj = nn.Sequential(
-            Transpose(1,2),
-            nn.Conv1d(in_channels, emb_channels, 1),
-            Transpose(1,2)
+            nn.Linear(in_channels, emb_channels),
         )
+        
+    
 
-    def forward(self, x, t = None, cond = None):
+    def forward(self, x, t = None, context = None):
         """
         :param x: the input tensor.
         :param timestep_embedding: the timestep embedding tensor.
@@ -1239,27 +1182,32 @@ class TransformerModel(nn.Module):
         :param masks: a list of masks for the decoder blocks.
         """
         x = th.squeeze(x, 1) # remove channel dimension [B, 1, T, D] -> [B, T, D]
-        f0_emb = self.f0_embeding(cond["f0"]) #from [B, T, 1] to [B, T, emb_channels]
-        ppg_emb = self.ppg_proj(cond["whisper"]) # from [B, T, 1024] to [B, T, emb_channels]
+        
+        f0 = th.squeeze(context["f0"]) #remove channel dimension [B, 1, T] -> [B, T]
+        f0_emb = self.f0_embeding(f0) #from [B, T] to [B, T, emb_channels]
+        print("The shape of f0_emb is: ", f0_emb.shape) #for debug
+        
+
+        ppg_emb = self.ppg_proj(context["whisper"]) # from [B, T, 1024] to [B, T, emb_channels]
+
+        
         conditions = th.cat([f0_emb, ppg_emb], dim = 2)
         conditions = self.condition_fusion(conditions)
         
-        step_emb = timestep_embedding(t,dim = self.emb_channels, repeat_only= False)  #get the original timestep embing [B,D] 
+        print("The device of x is ", x.device)
+        print("The device of conditions is ", f0_emb.device)
+        print("The device of ppg_emb is ", ppg_emb.device)
+        print("The device of t is ", t.device)
+        
+        print("the shape of time is ", t.shape)
+        print("the channel is ", self.emb_channels)
+        step_emb = timestep_embedding(timesteps = t,dim = self.emb_channels)  #get the original timestep embing [B,D] 
+        print("the shape of step_emb is ", step_emb.shape)
         t_emb = self.time_embed(step_emb)  #update the timestep embeding
-        
+        print("the shape of t_emb is ", t_emb.shape) # for debug
         x = self.input_proj(x)
-        
-        # if encoder_outputs is None:
-        #     encoder_outputs = []
-        #     for encoder in self.encoders:
-        #         x = encoder(x, timestep_embedding)
-        #         encoder_outputs.append(x)
-        # else:
-        #     for i, encoder in enumerate(self.encoders):
-        #         x = encoder(x, timestep_embedding)
-        #         encoder_outputs[i] = x
-
-        mask = th.squeeze(cond["mask"],-1) #[B, T, 1] to [B, T]
+        print("the shape of x is ", x.shape) # for debug
+        mask = th.squeeze(context["mask"],-1) #[B, T, 1] to [B, T]
 
         for i, decoder in reversed(list(enumerate(self.decoders))):
             x = decoder(x, conditions, t_emb , mask=mask)
@@ -1268,3 +1216,4 @@ class TransformerModel(nn.Module):
         x = th.unsqueeze(x, 1)  # add channel dimension [B, T, D] -> [B, 1, T, D]
         
         return x
+    

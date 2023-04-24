@@ -340,7 +340,7 @@ class DDPM(pl.LightningModule):
         x = x.to(memory_format=torch.contiguous_format).float()
         mask = mask.to(memory_format=torch.contiguous_format).float()
         whisper = whisper.to(memory_format=torch.contiguous_format).float()
-        f0 = f0.to(memory_format=torch.contiguous_format).float()
+        f0 = f0.to(memory_format=torch.contiguous_format).long()
         return x,mask,whisper,f0
 
     def shared_step(self, batch):
@@ -688,7 +688,7 @@ class LatentDiffusion(DDPM):
                 if cond_key in ['caption', 'coordinates_bbox']:
                     xc = batch[cond_key]
                 elif cond_key == 'features':
-                    xc = {"whisper": whisper, "f0": f0, "mask": mask}
+                    xc = {"whisper": whisper.to(self.device), "f0": f0.to(self.device), "mask": mask.to(self.device)}
                 elif cond_key == 'class_label':
                     xc = batch
                 else:
@@ -719,6 +719,7 @@ class LatentDiffusion(DDPM):
             if self.use_positional_encodings:
                 pos_x, pos_y = self.compute_latent_shifts(batch)
                 c = {'pos_x': pos_x, 'pos_y': pos_y}
+
         out = [z, c]
         if return_first_stage_outputs:
             if self.first_stage_key == "singingvoice":
@@ -920,13 +921,13 @@ class LatentDiffusion(DDPM):
 
         if isinstance(cond, dict):
             # hybrid case, cond is exptected to be a dict
+            cond = {'c_crossattn': [cond]}
             pass
         else:
             if not isinstance(cond, list):
                 cond = [cond]
             key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
             cond = {key: cond}
-
         if hasattr(self, "split_input_params"):
             assert len(cond) == 1  # todo can only deal with one conditioning atm
             assert not return_ids  
