@@ -169,32 +169,24 @@ class CrossAttention(nn.Module):
 
     def forward(self, x, context=None, mask=None):
         h = self.heads
-        print("the shape of transformer input is: ", x.shape) #for debug
         q = self.to_q(x)
         context = default(context, x)
         k = self.to_k(context)
         v = self.to_v(context)
-        
-        print("the shape of q is: ", q.shape) #for debug
-        print("the shape of k is: ", k.shape) #for debug
-        print("the shape of v is: ", v.shape) #for debug
+
 
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
-        print("the shape of q is: ", q.shape) #for debug
-        print("the shape of k is: ", k.shape) #for debug
-        print("the shape of v is: ", v.shape) #for debug
+
         
         sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
-        print("the shape of sim is: ", sim.shape) #for debug
-        
+
         if exists(mask):
-            print("the shape of mask is: ", mask.shape) #for debug
-            print("the type of mask is: ", mask.dtype) #for debug
+
             mask = rearrange(mask, 'b ... -> b (...)')
-            print("the shape of updated mask is: ", mask.shape) #for debug
+
             max_neg_value = -torch.finfo(sim.dtype).max
             mask = repeat(mask, 'b j -> (b h) () j', h=h)
-            print("the shape of final mask is: ", mask.shape) #for debug
+
             sim.masked_fill_(~mask, max_neg_value)
             
 

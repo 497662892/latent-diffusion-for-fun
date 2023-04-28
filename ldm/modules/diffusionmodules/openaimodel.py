@@ -1191,7 +1191,15 @@ class TransformerModel(nn.Module):
         f0_emb = self.f0_embeding(f0) #from [B, T] to [B, T, emb_channels]
         print("The shape of f0_emb is: ", f0_emb.shape) #for debug
         
-
+        
+        step_emb = self.timestep_embeding(t)  #get the original timestep embing [B,D] 
+        print("the shape of step_emb is ", step_emb.shape) # for debug
+        
+        print("current memory allocated: ", th.cuda.memory_allocated() / 1024 ** 3, "GB")
+        print("max memory allocated: ", th.cuda.max_memory_allocated() / 1024 ** 3, "GB")
+        
+        ppg = context["whisper"] # [B, T, 1024]
+        print("the shape of ppg is ", ppg.shape) # for debug
         ppg_emb = self.ppg_proj(context["whisper"]) # from [B, T, 1024] to [B, T, emb_channels]
 
         

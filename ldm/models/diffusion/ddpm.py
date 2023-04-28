@@ -338,7 +338,7 @@ class DDPM(pl.LightningModule):
             x = x[..., None]
             x = rearrange(x, 'b h w c -> b c h w')
         x = x.to(memory_format=torch.contiguous_format).float()
-        mask = mask.to(memory_format=torch.contiguous_format).float()
+        mask = mask.to(memory_format=torch.contiguous_format).bool()
         whisper = whisper.to(memory_format=torch.contiguous_format).float()
         f0 = f0.to(memory_format=torch.contiguous_format).long()
         return x,mask,whisper,f0
@@ -1064,6 +1064,9 @@ class LatentDiffusion(DDPM):
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
 
+        print("the device of logvar: ", self.logvar.device)
+        print("the device of t: ", t.device)
+        print("the shape of t is ", t.shape)
         logvar_t = self.logvar[t].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
         # loss = loss_simple / torch.exp(self.logvar) + self.logvar

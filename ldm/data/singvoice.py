@@ -18,7 +18,6 @@ import librosa
 class SingVoice(Dataset):
     def __init__(self, data_path, dataset, dataset_type,padding_size = 800):
         self.dataset_type = dataset_type
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.padding_size = padding_size
         self.dataset_dir = os.path.join(data_path, dataset)
 
