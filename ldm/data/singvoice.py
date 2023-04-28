@@ -119,15 +119,15 @@ class SingVoice(Dataset):
 
     def get_padding_y_gt(self, idx):
         y_gt = torch.zeros(
-            (self.padding_size, self.y_d), device=self.device, dtype=torch.float
+            (self.padding_size, self.y_d), dtype=torch.float
         )
         mask = torch.ones(
-            (self.padding_size, 1), device=self.device, dtype=torch.long
+            (self.padding_size, 1), dtype=torch.long
         )
 
         mcep = self.mcep[idx]
         sz = min(self.padding_size, len(mcep))
-        y_gt[:sz] = torch.as_tensor(mcep[:sz], device=self.device)
+        y_gt[:sz] = torch.as_tensor(mcep[:sz])
         mask[sz:] = 0
 
         return y_gt, mask

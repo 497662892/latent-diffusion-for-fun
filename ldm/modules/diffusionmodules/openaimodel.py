@@ -1080,10 +1080,13 @@ class TransformerDecoderBlock(TimestepBlock):
 
     def forward(self, x, cond, t_emb, mask=None):
         #prepare the input with time_step embedding
-        t_emb = th.unsqueeze(t_emb, 1) #turn [B, D] to [B, 1, D]
+        # t_emb = th.unsqueeze(t_emb, 1) #turn [B, D] to [B, 1, D]
+        print("the shape of t_emb is: ", t_emb.shape)
         h = self.in_layer(x) + self.emb_layer(t_emb)  # [B, T, D]
         h = self.out_layer(h)
         x = x + h
+        
+        print("the shape of input x is: ", x.shape)
         
         #apply the attention block
         x = self.decoder(x, cond, mask=mask)
@@ -1199,15 +1202,17 @@ class TransformerModel(nn.Module):
         
         #t is [B] to [B, 1]
         t = th.unsqueeze(t, 1)
-        step_emb = self.timestep_embeding(t)  #get the original timestep embing [B,D] 
-        
+        # step_emb = self.timestep_embeding(t)  #get the original timestep embing [B,D] 
+        print("the shape of t is ", t.shape) # for debug
+        step_emb = self.timestep_embeding(t)  #get the original timestep embing [B,D]
         print("the shape of step_emb is ", step_emb.shape)
         t_emb = self.time_embed(step_emb)  #update the timestep embeding
         print("the shape of t_emb is ", t_emb.shape) # for debug
         x = self.input_proj(x)
         print("the shape of x is ", x.shape) # for debug
-        mask = th.squeeze(context["mask"],-1) #[B, T, 1] to [B, T]
-
+        mask = th.transpose(context["mask"], 1, 2) #get the mask from [B, T, 1] to [B, 1, T]
+        print("the shape of mask is ", mask.shape) # for debug
+        
         for i, decoder in reversed(list(enumerate(self.decoders))):
             x = decoder(x, cond = conditions, t_emb=t_emb , mask=mask)
 
