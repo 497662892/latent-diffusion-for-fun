@@ -7,7 +7,8 @@ import numpy as np
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
-
+import torch.utils.cpp_extension
+import torch.backends.cudnn
 
 from ldm.modules.diffusionmodules.util import (
     checkpoint,
@@ -1160,6 +1161,14 @@ class TransformerModel(nn.Module):
             nn.SiLU(),
             nn.Linear(emb_channels, emb_channels),
         )
+        # self.ppg_proj = nn.Sequential(
+        #    Transpose(1,2),
+        #    nn.Conv1d(1024, emb_channels, 1),
+        #    nn.SiLU(),
+        #    nn.Conv1d(emb_channels, emb_channels, 1),
+        #    Transpose(1,2)
+        # )
+         
         self.condition_fusion = nn.Sequential(  #fusion of two condition 
             nn.Linear(emb_channels * 2, emb_channels),
             nn.SiLU(),
@@ -1185,6 +1194,9 @@ class TransformerModel(nn.Module):
         :param encoder_outputs: a list of encoder output tensors.
         :param masks: a list of masks for the decoder blocks.
         """
+        print("the cuda dir is: ", torch.utils.cpp_extension.CUDA_HOME)
+        print("the cuda version is: ", torch.version.cuda)
+        print("the current cudnn version is", torch.backends.cudnn.version())
         x = th.squeeze(x, 1) # remove channel dimension [B, 1, T, D] -> [B, T, D]
         
         f0 = th.squeeze(context["f0"]) #remove channel dimension [B, 1, T] -> [B, T]
@@ -1192,16 +1204,16 @@ class TransformerModel(nn.Module):
         print("The shape of f0_emb is: ", f0_emb.shape) #for debug
         
         
-        step_emb = self.timestep_embeding(t)  #get the original timestep embing [B,D] 
+        step_emb = timestep_embedding(t,dim = self.emb_channels)  #get the original timestep embing [B,D] 
         print("the shape of step_emb is ", step_emb.shape) # for debug
         
         print("current memory allocated: ", th.cuda.memory_allocated() / 1024 ** 3, "GB")
         print("max memory allocated: ", th.cuda.max_memory_allocated() / 1024 ** 3, "GB")
-        
-        ppg = context["whisper"] # [B, T, 1024]
-        print("the shape of ppg is ", ppg.shape) # for debug
+
         ppg_emb = self.ppg_proj(context["whisper"]) # from [B, T, 1024] to [B, T, emb_channels]
 
+        print("the shape of ppg_emb is ", ppg_emb.shape) # for debug
+        print("current memory allocated: ", th.cuda.memory_allocated() / 1024 ** 3, "GB")
         
         conditions = th.cat([f0_emb, ppg_emb], dim = 2)
         conditions = self.condition_fusion(conditions)
@@ -1228,4 +1240,111 @@ class TransformerModel(nn.Module):
         x = th.unsqueeze(x, 1)  # add channel dimension [B, T, D] -> [B, 1, T, D]
         
         return x
+
+
+#here is the code for the denoising network of diffsvc
+
+def Conv1d(*args, **kwargs):
+    layer = nn.Conv1d(*args, **kwargs)
+    nn.init.kaiming_normal_(layer.weight)
+    return layer
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, encoder_hidden, residual_channels, dilation):
+        super().__init__()
+        self.dilated_conv = Conv1d(residual_channels, 2 * residual_channels, 3, padding=dilation, dilation=dilation)
+        self.diffusion_projection = nn.Linear(residual_channels, residual_channels)
+        self.conditioner_projection = Conv1d(encoder_hidden, 2 * residual_channels, 1)
+        self.output_projection = Conv1d(residual_channels, 2 * residual_channels, 1)
+
+    def forward(self, x, conditioner, diffusion_step):
+        diffusion_step = self.diffusion_projection(diffusion_step).unsqueeze(-1)
+        conditioner = self.conditioner_projection(conditioner)
+        y = x + diffusion_step
+
+        y = self.dilated_conv(y) + conditioner
+
+        gate, filter = th.chunk(y, 2, dim=1)
+        # Using torch.split instead of torch.chunk to avoid using onnx::Slice
+        # gate, filter = torch.split(y, torch.div(y.shape[1], 2), dim=1)
+
+        y = th.sigmoid(gate) * th.tanh(filter)
+
+        y = self.output_projection(y)
+        residual, skip = th.chunk(y, 2, dim=1)
+        # Using torch.split instead of torch.chunk to avoid using onnx::Slice
+        # residual, skip = torch.split(y, torch.div(y.shape[1], 2), dim=1)
+        
+        return (x + residual) / th.sqrt(2.0), skip
+
+class DiffNet(nn.Module):
+    def __init__(self,in_channels,out_channels, emb_channels, num_blocks,dilation_cycle_length=4):
+        super().__init__()
+        
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.emb_channels = emb_channels
+        self.num_blocks = num_blocks
+        self.dilation_cycle_length = dilation_cycle_length
+        
+        self.input_projection = Conv1d(in_channels, emb_channels, 1)
+        dim = emb_channels
+        
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            nn.SiLU(),
+            nn.Linear(dim * 4, dim)
+        )
+        
+        self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
+
+        self.ppg_proj = nn.Sequential(   #reduce the number of channel of ppg
+            nn.Linear(1024, emb_channels),
+            nn.SiLU(),
+            nn.Linear(emb_channels, emb_channels),
+        )
+
+        self.residual_layers = nn.ModuleList([
+            ResidualBlock(emb_channels, emb_channels, 2 ** (i % dilation_cycle_length))
+            for i in range(num_blocks)
+        ])
+        self.skip_projection = Conv1d(emb_channels, emb_channels, 1)
+        self.output_projection = Conv1d(emb_channels, out_channels, 1)
+        nn.init.zeros_(self.output_projection.weight)
+
+    def forward(self, x, diffusion_step, cond):
+        """
+
+        :param x: [B, 1, T, M]
+        :param diffusion_step: [B]
+        :param cond: dict
+        :return:
+        """
+        x = x[:, 0]
+        x = th.transpose(x, 1, 2)  # x [B, M, T]
+        x = self.input_projection(x)  # x [B, residual_channel, T]
+
+        x = F.relu(x)
+        
+        diffusion_step = timestep_embedding(diffusion_step, dim = self.emb_channels)
+        diffusion_step = self.mlp(diffusion_step)  # [B, residual_channel]
+        
+        ppg = self.ppg_proj(cond["whisper"])
+        f0 = self.f0_embeding(cond["f0"])
+        
+        condition = th.transpose(ppg + f0, 1, 2)  # [B, residual_channel, T]
     
+        
+        skip = []
+        for layer_id, layer in enumerate(self.residual_layers):
+            x, skip_connection = layer(x, condition, diffusion_step)
+            skip.append(skip_connection)
+
+        x = th.sum(th.stack(skip), dim=0) / th.sqrt(len(self.residual_layers))
+        x = self.skip_projection(x)
+        x = F.relu(x)
+        
+        x = self.output_projection(x)  # [B, 10, T]
+        x = th.transpose(x, 1, 2)  # [B, T, 10]
+        return x[:, None, :, :]
