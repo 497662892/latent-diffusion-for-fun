@@ -20,7 +20,9 @@ from ldm.modules.diffusionmodules.util import (
     timestep_embedding,
 )
 from ldm.modules.attention import SpatialTransformer, BasicTransformerBlock
+import os
 
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 # dummy replace
 def convert_module_to_f16(x):
@@ -1200,6 +1202,12 @@ class TransformerModel(nn.Module):
         x = th.squeeze(x, 1) # remove channel dimension [B, 1, T, D] -> [B, T, D]
         
         f0 = th.squeeze(context["f0"]) #remove channel dimension [B, 1, T] -> [B, T]
+        print("the shape of f0 is: ", f0.shape) #for debug
+        print("the max of f0 is: ", th.max(f0)) #for debug
+        print("the min of f0 is: ", th.min(f0)) #for debug
+        print("the type of f0 is: ", f0.dtype) #for debug
+        print("this is the f0: ", f0) #for debug
+        
         f0_emb = self.f0_embeding(f0) #from [B, T] to [B, T, emb_channels]
         print("The shape of f0_emb is: ", f0_emb.shape) #for debug
         

@@ -141,8 +141,8 @@ def get_bin_index(f0, n_bins=300, m = "C2", M = "C7"):
         index: tensor whose shape is same to f0
     """
     # Set normal index in [1, n_bins - 1]
-    m = librosa.note_to_hz(m)
-    M = librosa.note_to_hz(M)
+    m = np.log(librosa.note_to_hz(m))  #forget take log is where the bug from!
+    M = np.log(librosa.note_to_hz(M))  
     
     width = (M + 1e-7 - m) / (n_bins - 1)
     index = (f0 - m) // width + 1
