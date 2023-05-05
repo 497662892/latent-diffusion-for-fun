@@ -1064,9 +1064,10 @@ class LatentDiffusion(DDPM):
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
 
-        print("the device of logvar: ", self.logvar.device)
-        print("the device of t: ", t.device)
-        print("the shape of t is ", t.shape)
+        #for debug
+        print("current memory allocated: ", torch.cuda.memory_allocated() / 1024 ** 3, "GB")
+        print("max memory allocated: ", torch.cuda.max_memory_allocated() / 1024 ** 3, "GB")
+        
         logvar_t = self.logvar[t].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
         # loss = loss_simple / torch.exp(self.logvar) + self.logvar

@@ -1157,7 +1157,7 @@ class TransformerModel(nn.Module):
         )
         # encoder for conditions
         self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
-        self.timestep_embeding = nn.Embedding(1000, emb_channels)  #emb the timestep into [B,T,D]
+
         self.ppg_proj = nn.Sequential(   #reduce the number of channel of ppg
             nn.Linear(1024, emb_channels),
             nn.SiLU(),
@@ -1196,50 +1196,26 @@ class TransformerModel(nn.Module):
         :param encoder_outputs: a list of encoder output tensors.
         :param masks: a list of masks for the decoder blocks.
         """
-        print("the cuda dir is: ", torch.utils.cpp_extension.CUDA_HOME)
-        print("the cuda version is: ", torch.version.cuda)
-        print("the current cudnn version is", torch.backends.cudnn.version())
+
         x = th.squeeze(x, 1) # remove channel dimension [B, 1, T, D] -> [B, T, D]
         
         f0 = th.squeeze(context["f0"]) #remove channel dimension [B, 1, T] -> [B, T]
-        print("the shape of f0 is: ", f0.shape) #for debug
-        print("the max of f0 is: ", th.max(f0)) #for debug
-        print("the min of f0 is: ", th.min(f0)) #for debug
-        print("the type of f0 is: ", f0.dtype) #for debug
-        print("this is the f0: ", f0) #for debug
+
         
         f0_emb = self.f0_embeding(f0) #from [B, T] to [B, T, emb_channels]
-        print("The shape of f0_emb is: ", f0_emb.shape) #for debug
-        
-        
-        step_emb = timestep_embedding(t,dim = self.emb_channels)  #get the original timestep embing [B,D] 
-        print("the shape of step_emb is ", step_emb.shape) # for debug
-        
-        print("current memory allocated: ", th.cuda.memory_allocated() / 1024 ** 3, "GB")
-        print("max memory allocated: ", th.cuda.max_memory_allocated() / 1024 ** 3, "GB")
 
         ppg_emb = self.ppg_proj(context["whisper"]) # from [B, T, 1024] to [B, T, emb_channels]
-
-        print("the shape of ppg_emb is ", ppg_emb.shape) # for debug
-        print("current memory allocated: ", th.cuda.memory_allocated() / 1024 ** 3, "GB")
         
         conditions = th.cat([f0_emb, ppg_emb], dim = 2)
         conditions = self.condition_fusion(conditions)
         
-        print("The device of t is ", t.device)
+        step_emb = timestep_embedding(t,dim = self.emb_channels)  #get the original timestep embing [B,D] 
+        step_emb = th.unsqueeze(step_emb, 1) #turn [B, D] to [B, 1, D]
+        t_emb = self.time_embed(step_emb)  #update the timestep embeding [B, 1, D] -> [B, 1, D]
+
+        x = self.input_proj(x) #[B, T, D]
         
-        #t is [B] to [B, 1]
-        t = th.unsqueeze(t, 1)
-        # step_emb = self.timestep_embeding(t)  #get the original timestep embing [B,D] 
-        print("the shape of t is ", t.shape) # for debug
-        step_emb = self.timestep_embeding(t)  #get the original timestep embing [B,D]
-        print("the shape of step_emb is ", step_emb.shape)
-        t_emb = self.time_embed(step_emb)  #update the timestep embeding
-        print("the shape of t_emb is ", t_emb.shape) # for debug
-        x = self.input_proj(x)
-        print("the shape of x is ", x.shape) # for debug
         mask = th.transpose(context["mask"], 1, 2) #get the mask from [B, T, 1] to [B, 1, T]
-        print("the shape of mask is ", mask.shape) # for debug
         
         for i, decoder in reversed(list(enumerate(self.decoders))):
             x = decoder(x, cond = conditions, t_emb=t_emb , mask=mask)

@@ -129,6 +129,11 @@ class CheckpointFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *output_grads):
+        
+        print("backward") #for debug
+        print("The type of ctx is: ", type(ctx)) #for debug
+        print('the ctx is: ', ctx) #for debug
+        
         ctx.input_tensors = [x.detach().requires_grad_(True) for x in ctx.input_tensors]
         with torch.enable_grad():
             # Fixes a bug where the first op in run_function modifies the
@@ -163,9 +168,7 @@ def timestep_embedding(timesteps, dim, max_period=10000, repeat_only=False):
             -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
         )
         freqs = freqs.to(memory_format=torch.contiguous_format).float()
-        print("the shape of freqs is: ", freqs.shape)
-        print("the device of freqs is: ", freqs.device) #for debugging
-        print("here is the freqs: ",freqs)
+
         temp = freqs.to(device=timesteps.device)
         
         args = timesteps[:, None].float() * temp[None]
