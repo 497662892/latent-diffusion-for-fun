@@ -13,10 +13,25 @@ import os
 import logging
 import time
 import librosa
-
+import psutil
 
 class SingVoice(Dataset):
     def __init__(self, data_path, dataset, dataset_type,padding_size = 800):
+        # 获取内存使用信息
+        memory_info = psutil.virtual_memory()
+
+        # 输出总内存大小
+        print(f"Total memory: {memory_info.total/1024**3} GB")
+
+        # 输出可用内存大小
+        print(f"Available memory: {memory_info.available/1024**3} GB")
+
+        # 输出已使用内存大小
+        print(f"Used memory: {memory_info.used/1024**3} GB")
+
+        # 输出空闲内存大小
+        print(f"Free memory: {memory_info.free/1024**3} GB")
+        
         self.dataset_type = dataset_type
         self.padding_size = padding_size
         self.dataset_dir = os.path.join(data_path, dataset)
@@ -145,7 +160,7 @@ def get_bin_index(f0, n_bins=300, m = "C2", M = "C7"):
     M = np.log(librosa.note_to_hz(M))  
     
     width = (M + 1e-7 - m) / (n_bins - 1)
-    index = (f0 - m) // width + 1
+    index = torch.div((f0 - m), width, rounding_mode='floor') + 1
     # Set unvoiced frames as 0
     index[torch.where(f0 == 0)] = 0
     # Therefore, the vocabulary is [0, n_bins- 1], whose size is n_bins

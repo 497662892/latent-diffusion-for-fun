@@ -350,9 +350,7 @@ class DDPM(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss, loss_dict = self.shared_step(batch)
-        
-        print("this is loss",loss) # for debug
-        
+
         self.log_dict(loss_dict, prog_bar=True,
                       logger=True, on_step=True, on_epoch=True)
 
@@ -729,11 +727,10 @@ class LatentDiffusion(DDPM):
             if self.first_stage_key == "singingvoice":
                 temp = torch.unsqueeze(z,1)
                 temp = temp.repeat(1,3,1,1)
-                print("the shape of temp is:",temp.shape) # for debug
                 xrec = self.decode_first_stage(temp)
             else:
                 xrec = self.decode_first_stage(z)
-            print("the shape of xrec is:",xrec.shape) # for debug
+
             out.extend([x, xrec])
         if return_original_cond:
             out.append(xc)
@@ -1305,10 +1302,11 @@ class LatentDiffusion(DDPM):
 
 
     @torch.no_grad()
-    def log_images(self, batch, N=8, n_row=4, sample=True, ddim_steps=200, ddim_eta=1., return_keys=None,
-                   quantize_denoised=True, inpaint=False, plot_denoise_rows=False, plot_progressive_rows=True,
-                   plot_diffusion_rows=True, plot_condition = False, **kwargs):
+    def log_images(self, batch, N=8, n_row=4, sample=False, ddim_steps=200, ddim_eta=1., return_keys=None,
+                   quantize_denoised=False, inpaint=False, plot_denoise_rows=False, plot_progressive_rows=False,
+                   plot_diffusion_rows=False, plot_condition = False, **kwargs):
 
+        print("the max gpu memory is: ", torch.cuda.max_memory_allocated() / 1024**3, "GB")
         use_ddim = ddim_steps is not None
 
         log = dict()

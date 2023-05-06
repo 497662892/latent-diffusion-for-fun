@@ -2,7 +2,7 @@ import argparse, os, sys, datetime, glob, importlib, csv
 import numpy as np
 import time
 import torch
-
+import psutil
 
 import torchvision
 import pytorch_lightning as pl
@@ -253,6 +253,7 @@ class SetupCallback(Callback):
     def on_keyboard_interrupt(self, trainer, pl_module):
         if trainer.global_rank == 0:
             print("Summoning checkpoint.")
+            
             ckpt_path = os.path.join(self.ckptdir, "last.ckpt")
             trainer.save_checkpoint(ckpt_path)
 
@@ -717,7 +718,7 @@ if __name__ == "__main__":
 
         # run
         if opt.train:
-            try:
+            try:  
                 trainer.fit(model, data)
             except Exception:
                 melk()
