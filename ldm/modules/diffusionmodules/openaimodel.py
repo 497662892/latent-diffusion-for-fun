@@ -1078,18 +1078,15 @@ class TransformerDecoderBlock(TimestepBlock):
         )
             
         self.decoder = BasicTransformerBlock(dim=emb_channels, n_heads= num_heads, d_head= emb_channels//num_heads, 
-                                             dropout=dropout, context_dim=emb_channels)
+                                             dropout=dropout, context_dim=emb_channels, checkpoint = use_checkpoint)
 
 
     def forward(self, x, cond, t_emb, mask=None):
         #prepare the input with time_step embedding
         # t_emb = th.unsqueeze(t_emb, 1) #turn [B, D] to [B, 1, D]
-        print("the shape of t_emb is: ", t_emb.shape)
         h = self.in_layer(x) + self.emb_layer(t_emb)  # [B, T, D]
         h = self.out_layer(h)
         x = x + h
-        
-        print("the shape of input x is: ", x.shape)
         
         #apply the attention block
         x = self.decoder(x, cond, mask=mask)
@@ -1331,4 +1328,5 @@ class DiffNet(nn.Module):
         
         x = self.output_projection(x)  # [B, 10, T]
         x = th.transpose(x, 1, 2)  # [B, T, 10]
+        print('the shape of output x is', x.shape)
         return x[:, None, :, :]

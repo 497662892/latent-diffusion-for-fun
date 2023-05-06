@@ -350,7 +350,9 @@ class DDPM(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss, loss_dict = self.shared_step(batch)
-
+        
+        print("this is loss",loss) # for debug
+        
         self.log_dict(loss_dict, prog_bar=True,
                       logger=True, on_step=True, on_epoch=True)
 
@@ -539,6 +541,8 @@ class LatentDiffusion(DDPM):
     def _get_denoise_row_from_list(self, samples, desc='', force_no_decoder_quantization=False):
         denoise_row = []
         for zd in tqdm(samples, desc=desc):
+            if zd.shape[1] == 1:
+                zd = zd.repeat(1, 3, 1, 1)  #for debug
             denoise_row.append(self.decode_first_stage(zd.to(self.device),
                                                             force_not_quantize=force_no_decoder_quantization))
         n_imgs_per_row = len(denoise_row)
@@ -673,14 +677,14 @@ class LatentDiffusion(DDPM):
         x = torch.cat([x,x,x],dim=1)
         
         encoder_posterior = self.encode_first_stage(x)
-        z = self.get_first_stage_encoding(encoder_posterior).detach()
+        z = self.get_first_stage_encoding(encoder_posterior).detach() # [B, 3, T//4, D//4]
         #take the first channel of z
         if self.first_stage_key == "singingvoice":
-            z = z[:,0,:,:]
+            z = z[:,0,:,:] #[B,T//4,D]
             #rescale mask into the length of z
             length = mask.shape[1]
             mask = Resize((length//4,1))(mask) #downsample mask [B,T//4,1]
-        
+
         if self.model.conditioning_key is not None:
             if cond_key is None:
                 cond_key = self.cond_stage_key
@@ -705,7 +709,7 @@ class LatentDiffusion(DDPM):
                     c = self.get_learned_conditioning(xc.to(self.device))
             else:
                 c = xc
-            if bs is not None:
+            if bs is not None and type(c) is not dict:
                 c = c[:bs]
 
             if self.use_positional_encodings:
@@ -723,9 +727,13 @@ class LatentDiffusion(DDPM):
         out = [z, c]
         if return_first_stage_outputs:
             if self.first_stage_key == "singingvoice":
-                xrec = self.decode_first_stage(torch.cat([z, z, z], dim=1))
+                temp = torch.unsqueeze(z,1)
+                temp = temp.repeat(1,3,1,1)
+                print("the shape of temp is:",temp.shape) # for debug
+                xrec = self.decode_first_stage(temp)
             else:
                 xrec = self.decode_first_stage(z)
+            print("the shape of xrec is:",xrec.shape) # for debug
             out.extend([x, xrec])
         if return_original_cond:
             out.append(xc)
@@ -781,12 +789,18 @@ class LatentDiffusion(DDPM):
                 return decoded
             else:
                 if isinstance(self.first_stage_model, VQModelInterface):
+                    if z.dim() == 3:
+                        z = z[:,None,:,:]
+                        z = z.repeat(1,3,1,1)
                     return self.first_stage_model.decode(z, force_not_quantize=predict_cids or force_not_quantize)
                 else:
                     return self.first_stage_model.decode(z)
 
         else:
             if isinstance(self.first_stage_model, VQModelInterface):
+                if z.dim() == 3:
+                    z = z[:,None,:,:]
+                    z = z.repeat(1,3,1,1)
                 return self.first_stage_model.decode(z, force_not_quantize=predict_cids or force_not_quantize)
             else:
                 return self.first_stage_model.decode(z)
@@ -847,6 +861,10 @@ class LatentDiffusion(DDPM):
 
         else:
             if isinstance(self.first_stage_model, VQModelInterface):
+                #check the dim of z, if it is 3, turn it into 4
+                if z.dim() == 3:
+                    z = z[:,None,:,:]
+                    z = z.repeat(1,3,1,1)
                 return self.first_stage_model.decode(z, force_not_quantize=predict_cids or force_not_quantize)
             else:
                 return self.first_stage_model.decode(z)
@@ -1057,16 +1075,15 @@ class LatentDiffusion(DDPM):
         else:
             raise NotImplementedError()
         
+        target = target[:,None,:,:] #change the shape of target to (B, 1, T, C)
+        
         if mask != None:
             target = target * mask
             model_output = model_output * mask
         
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
+        
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
-
-        #for debug
-        print("current memory allocated: ", torch.cuda.memory_allocated() / 1024 ** 3, "GB")
-        print("max memory allocated: ", torch.cuda.max_memory_allocated() / 1024 ** 3, "GB")
         
         logvar_t = self.logvar[t].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
@@ -1082,7 +1099,6 @@ class LatentDiffusion(DDPM):
         loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
         loss += (self.original_elbo_weight * loss_vlb)
         loss_dict.update({f'{prefix}/loss': loss})
-
         return loss, loss_dict
 
     def p_mean_variance(self, x, c, t, clip_denoised: bool, return_codebook_ids=False, quantize_denoised=False,
@@ -1345,6 +1361,9 @@ class LatentDiffusion(DDPM):
                 samples, z_denoise_row = self.sample_log(cond=c,batch_size=N,ddim=use_ddim,
                                                          ddim_steps=ddim_steps,eta=ddim_eta)
                 # samples, z_denoise_row = self.sample(cond=c, batch_size=N, return_intermediates=True)
+                if samples.shape[1] == 1:
+                    samples = samples.repeat(1, 3, 1, 1)
+                
             x_samples = self.decode_first_stage(samples)
             log["samples"] = x_samples
             if plot_denoise_rows:
@@ -1360,6 +1379,8 @@ class LatentDiffusion(DDPM):
                                                              quantize_denoised=True)
                     # samples, z_denoise_row = self.sample(cond=c, batch_size=N, return_intermediates=True,
                     #                                      quantize_denoised=True)
+                    if samples.shape[1] == 1:
+                        samples = samples.repeat(1, 3, 1, 1)
                 x_samples = self.decode_first_stage(samples.to(self.device))
                 log["samples_x0_quantized"] = x_samples
 
