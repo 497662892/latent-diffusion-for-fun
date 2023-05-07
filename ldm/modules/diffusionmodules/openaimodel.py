@@ -1257,10 +1257,10 @@ class ResidualBlock(nn.Module):
         # Using torch.split instead of torch.chunk to avoid using onnx::Slice
         # residual, skip = torch.split(y, torch.div(y.shape[1], 2), dim=1)
         
-        return (x + residual) / th.sqrt(2.0), skip
+        return (x + residual) / math.sqrt(2.0), skip
 
 class DiffNet(nn.Module):
-    def __init__(self,in_channels,out_channels, emb_channels, num_blocks,dilation_cycle_length=4):
+    def __init__(self,in_channels,out_channels, emb_channels, num_blocks,dilation_cycle_length=4, use_attention=True):
         super().__init__()
         
         self.in_channels = in_channels
@@ -1268,6 +1268,7 @@ class DiffNet(nn.Module):
         self.emb_channels = emb_channels
         self.num_blocks = num_blocks
         self.dilation_cycle_length = dilation_cycle_length
+        self.use_attention = use_attention
         
         self.input_projection = Conv1d(in_channels, emb_channels, 1)
         dim = emb_channels
@@ -1290,11 +1291,14 @@ class DiffNet(nn.Module):
             ResidualBlock(emb_channels, emb_channels, 2 ** (i % dilation_cycle_length))
             for i in range(num_blocks)
         ])
+        
+        self.condition_transformer = BasicTransformerBlock(dim=emb_channels, n_heads= 8, d_head= emb_channels//8,dropout=0.1, checkpoint = False)
+        
         self.skip_projection = Conv1d(emb_channels, emb_channels, 1)
         self.output_projection = Conv1d(emb_channels, out_channels, 1)
         nn.init.zeros_(self.output_projection.weight)
 
-    def forward(self, x, diffusion_step, cond):
+    def forward(self, x, t, context):
         """
 
         :param x: [B, 1, T, M]
@@ -1302,31 +1306,35 @@ class DiffNet(nn.Module):
         :param cond: dict
         :return:
         """
-        x = x[:, 0]
         x = th.transpose(x, 1, 2)  # x [B, M, T]
-        x = self.input_projection(x)  # x [B, residual_channel, T]
-
+        x = self.input_projection(x)  # x [B, emb_channels, T]
         x = F.relu(x)
         
-        diffusion_step = timestep_embedding(diffusion_step, dim = self.emb_channels)
-        diffusion_step = self.mlp(diffusion_step)  # [B, residual_channel]
+        step_emb = timestep_embedding(t, dim = self.emb_channels)
+        step_emb = self.mlp(step_emb)  # [B, emb_channels]
         
-        ppg = self.ppg_proj(cond["whisper"])
-        f0 = self.f0_embeding(cond["f0"])
+        ppg = self.ppg_proj(context["whisper"]) # from [B, T, 1024] to [B, T, emb_channels]
         
-        condition = th.transpose(ppg + f0, 1, 2)  # [B, residual_channel, T]
-    
+        f0 = th.squeeze(context["f0"]) #remove channel dimension [B, 1, T] -> [B, T]
+        f0 = self.f0_embeding(f0)  #[B, T , emb_channels]
+        
+        condition = ppg + f0 # [B, T, emb_channels]
+        
+        mask = th.transpose(context["mask"], 1, 2) #get the mask from [B, T, 1] to [B, 1, T]
+        
+        if self.use_attention:
+            condition = self.condition_transformer(th.transpose(x,1,2), condition, mask = mask)
+        
+        condition = th.transpose(condition, 1, 2) # [B, T, emb_channels] to [B, emb_channels, T]
         
         skip = []
         for layer_id, layer in enumerate(self.residual_layers):
-            x, skip_connection = layer(x, condition, diffusion_step)
+            x, skip_connection = layer(x, condition, step_emb)
             skip.append(skip_connection)
 
-        x = th.sum(th.stack(skip), dim=0) / th.sqrt(len(self.residual_layers))
-        x = self.skip_projection(x)
+        x = th.sum(th.stack(skip), dim=0) / math.sqrt(len(self.residual_layers))
+        x = self.skip_projection(x) # [B, emb_channels, T]
         x = F.relu(x)
-        
         x = self.output_projection(x)  # [B, 10, T]
         x = th.transpose(x, 1, 2)  # [B, T, 10]
-        print('the shape of output x is', x.shape)
         return x[:, None, :, :]
