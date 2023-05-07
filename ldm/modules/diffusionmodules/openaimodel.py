@@ -1292,6 +1292,7 @@ class DiffNet(nn.Module):
             for i in range(num_blocks)
         ])
         
+        self.diffusion_projection = nn.Linear(emb_channels, emb_channels)
         self.condition_transformer = BasicTransformerBlock(dim=emb_channels, n_heads= 8, d_head= emb_channels//8,dropout=0.1, checkpoint = False)
         
         self.skip_projection = Conv1d(emb_channels, emb_channels, 1)
@@ -1323,7 +1324,9 @@ class DiffNet(nn.Module):
         mask = th.transpose(context["mask"], 1, 2) #get the mask from [B, T, 1] to [B, 1, T]
         
         if self.use_attention:
-            condition = self.condition_transformer(th.transpose(x,1,2), condition, mask = mask)
+            step_emb_temp = self.diffusion_projection(step_emb).unsqueeze(1) # [B, emb_channels] to [B, 1, emb_channels]
+            temp = th.transpose(x,1,2) + step_emb_temp  #use the noisy input and step as the query of the transformer
+            condition = self.condition_transformer(temp, condition, mask = mask)
         
         condition = th.transpose(condition, 1, 2) # [B, T, emb_channels] to [B, emb_channels, T]
         
