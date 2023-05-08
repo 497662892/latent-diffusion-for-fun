@@ -680,10 +680,9 @@ class LatentDiffusion(DDPM):
         encoder_posterior = self.encode_first_stage(x)
         z = self.get_first_stage_encoding(encoder_posterior).detach() # [B, 3, T//4, D//4]
         #take the first channel of z
+
         if self.first_stage_key == "singingvoice":
-            z = z[:,0,:,:] #[B,T//4,D]
-            #rescale mask into the length of z
-            if mask.shape[1] != z.shape[1]:
+            if mask.shape[1] != z.shape[2]:
                 length = mask.shape[1]
                 mask = Resize((length//4,1))(mask) #downsample mask [B,T//4,1]
 
@@ -725,16 +724,9 @@ class LatentDiffusion(DDPM):
             if self.use_positional_encodings:
                 pos_x, pos_y = self.compute_latent_shifts(batch)
                 c = {'pos_x': pos_x, 'pos_y': pos_y}
-
         out = [z, c]
         if return_first_stage_outputs:
-            if self.first_stage_key == "singingvoice" and not self.identity:
-                temp = torch.unsqueeze(z,1)
-                temp = temp.repeat(1,3,1,1)
-                xrec = self.decode_first_stage(temp)
-            else:
-                xrec = self.decode_first_stage(z)
-
+            xrec = self.decode_first_stage(z)
             out.extend([x, xrec])
         if return_original_cond:
             out.append(xc)
@@ -796,9 +788,6 @@ class LatentDiffusion(DDPM):
 
         else:
             if isinstance(self.first_stage_model, VQModelInterface):
-                if z.dim() == 3:
-                    z = z[:,None,:,:]
-                    z = z.repeat(1,3,1,1)
                 return self.first_stage_model.decode(z, force_not_quantize=predict_cids or force_not_quantize)
             else:
                 return self.first_stage_model.decode(z)
@@ -859,10 +848,6 @@ class LatentDiffusion(DDPM):
 
         else:
             if isinstance(self.first_stage_model, VQModelInterface):
-                #check the dim of z, if it is 3, turn it into 4
-                if z.dim() == 3:
-                    z = z[:,None,:,:]
-                    z = z.repeat(1,3,1,1)
                 return self.first_stage_model.decode(z, force_not_quantize=predict_cids or force_not_quantize)
             else:
                 return self.first_stage_model.decode(z)
@@ -1059,6 +1044,7 @@ class LatentDiffusion(DDPM):
             mask = cond["mask"]
             mask = torch.unsqueeze(mask, 1) # (B, 1, T, 1)
             mask = mask.repeat(1, 1, 1, x_start.shape[-1]) # (B, 1, T, C)
+
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         model_output = self.apply_model(x_noisy, t, cond)
@@ -1073,8 +1059,6 @@ class LatentDiffusion(DDPM):
         else:
             raise NotImplementedError()
         
-        target = target[:,None,:,:] #change the shape of target to (B, 1, T, C)
-
         if mask != None:
             target = target * mask
             model_output = model_output * mask

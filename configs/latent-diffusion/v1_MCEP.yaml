@@ -34,6 +34,7 @@ model:
         dims: 1
         num_heads: 8
         use_new_attention_order: True
+        z_channels: 1
     first_stage_config:
       target: ldm.models.autoencoder.IdentityFirstStage
     cond_stage_config: __is_first_stage__

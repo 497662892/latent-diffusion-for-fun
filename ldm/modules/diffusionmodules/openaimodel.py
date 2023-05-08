@@ -2,7 +2,7 @@ from abc import abstractmethod
 from functools import partial
 import math
 from typing import Iterable
-
+from einops import rearrange, repeat
 import numpy as np
 import torch as th
 import torch.nn as nn
@@ -1129,10 +1129,12 @@ class TransformerModel(nn.Module):
         num_heads=1,
         num_head_channels=-1,
         use_new_attention_order=False,
+        z_channels = 1
     ):
         super().__init__()
 
         # Decoder blocks
+        self.z_channels = z_channels
         self.decoders = nn.ModuleList()
         for i in range(num_blocks):
             self.decoders.append(
@@ -1183,7 +1185,7 @@ class TransformerModel(nn.Module):
         self.input_proj = nn.Sequential(
             nn.Linear(in_channels, emb_channels),
         )
-        
+        self.out_channels = out_channels
     
 
     def forward(self, x, t = None, context = None):
@@ -1194,6 +1196,9 @@ class TransformerModel(nn.Module):
         :param masks: a list of masks for the decoder blocks.
         """
 
+        x = rearrange(x, 'b c t d -> b t (c d)')
+
+        
         x = th.squeeze(x, 1) # remove channel dimension [B, 1, T, D] -> [B, T, D]
         
         f0 = th.squeeze(context["f0"]) #remove channel dimension [B, 1, T] -> [B, T]
@@ -1218,8 +1223,11 @@ class TransformerModel(nn.Module):
             x = decoder(x, cond = conditions, t_emb=t_emb , mask=mask)
 
         x = self.output_conv(x)
-        x = th.unsqueeze(x, 1)  # add channel dimension [B, T, D] -> [B, 1, T, D]
-        
+        c = self.z_channels
+        e = self.out_channels//c
+
+        x = rearrange(x, 'b t (x y) -> b x t y', x = c, y = e)
+
         return x
 
 
@@ -1260,7 +1268,7 @@ class ResidualBlock(nn.Module):
         return (x + residual) / math.sqrt(2.0), skip
 
 class DiffNet(nn.Module):
-    def __init__(self,in_channels,out_channels, emb_channels, num_blocks,dilation_cycle_length=4, use_attention=True):
+    def __init__(self,in_channels,out_channels, emb_channels, num_blocks,dilation_cycle_length=4, use_attention=True, z_channels = 1):
         super().__init__()
         
         self.in_channels = in_channels
@@ -1269,7 +1277,7 @@ class DiffNet(nn.Module):
         self.num_blocks = num_blocks
         self.dilation_cycle_length = dilation_cycle_length
         self.use_attention = use_attention
-        
+        self.z_channels = z_channels
         self.input_projection = Conv1d(in_channels, emb_channels, 1)
         dim = emb_channels
         
@@ -1307,6 +1315,10 @@ class DiffNet(nn.Module):
         :param cond: dict
         :return:
         """
+
+        x = rearrange(x, 'b c t d -> b t (c d)')
+
+        
         x = th.transpose(x, 1, 2)  # x [B, M, T]
         x = self.input_projection(x)  # x [B, emb_channels, T]
         x = F.relu(x)
@@ -1340,4 +1352,9 @@ class DiffNet(nn.Module):
         x = F.relu(x)
         x = self.output_projection(x)  # [B, 10, T]
         x = th.transpose(x, 1, 2)  # [B, T, 10]
-        return x[:, None, :, :]
+        c = self.z_channels
+        e = self.out_channels//c
+
+        x = rearrange(x, 'b t (x y) -> b x t y', x = c, y = e)
+
+        return x

@@ -33,6 +33,7 @@ model:
         emb_channels: 256 #the dimension of the embedding space
         dilation_cycle_length: 4
         use_attention: False
+        z_channels: 1
 
     first_stage_config:
       target: ldm.models.autoencoder.IdentityFirstStage

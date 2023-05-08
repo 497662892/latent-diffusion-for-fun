@@ -145,7 +145,7 @@ if __name__ == "__main__":
                 c = {"whisper": whisper, "f0": f0, "mask": mask_post}
                 
                 if not config.model.params.identity:
-                    shape = (1, 1, 200, 10)
+                    shape = (1, 3, 200, 10)
                 else:
                     shape = (1, 1, 800, 40)
                 
