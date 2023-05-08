@@ -11,12 +11,14 @@ import json
 import torchaudio
 import random
 from torchvision.transforms import Resize
-from config import data_path, dataset2wavpath
-
-import extract_sp
-import extract_mcep
 
 from ldm.data.singvoice import SingVoice
+
+sys.path.append("../")
+from config import data_path, dataset2wavpath
+sys.path.append("../preprocess")
+import extract_sp
+import extract_mcep
 
 #get the input of source audio 
 
@@ -86,12 +88,14 @@ if __name__ == "__main__":
         "--indir",
         type=str,
         nargs="?",
-        help="dir containing image-mask pairs (`example.png` and `example_mask.png`)",
+        default='../preprocess',
+        help="dir containing test data",
     )
     parser.add_argument(
         "--outdir",
         type=str,
         nargs="?",
+        default='outputs/v1_MCEP',
         help="dir to write results to",
     )
     parser.add_argument(
@@ -115,9 +119,9 @@ if __name__ == "__main__":
     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=0)
     uids = get_uids(opt.dataset, "test")
     
-    config = OmegaConf.load("models/ldm/inpainting_big/config.yaml")
+    config = OmegaConf.load("configs/infer/v1_MCEP_infer.yaml")
     model = instantiate_from_config(config.model)
-    model.load_state_dict(torch.load("models/ldm/singingvoice/last.ckpt")["state_dict"],
+    model.load_state_dict(torch.load("logs/2023-05-07T23-26-00_v1_MCEP/checkpoints/last.ckpt")["state_dict"],
                           strict=False)
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -133,25 +137,36 @@ if __name__ == "__main__":
                 mask, whisper, f0 =  cases["mask"], cases["whisper"], cases["f0"]
                 # encode masked image and concat downsampled mask
                 mask = mask.bool()
-                mask_post = Resize((mask.shape[1]//4,1))(mask) #downsample mask [B,T//4,1]
+                if not config.model.params.identity:
+                    mask_post = Resize((mask.shape[1]//4,1))(mask) #downsample mask [B,T//4,1]
+                else:
+                    mask_post = mask
                 
                 c = {"whisper": whisper, "f0": f0, "mask": mask_post}
-                shape = (1, 3, 200, 10)
+                
+                if not config.model.params.identity:
+                    shape = (1, 1, 200, 10)
+                else:
+                    shape = (1, 1, 800, 40)
                 
                 #sampling
                 samples_ddim, _ = sampler.sample(S=opt.steps,
                                                  conditioning=c,
                                                  batch_size=c.shape[0],
-                                                 shape=shape,
+                                                 shape=shape[1:],
                                                  verbose=False)
-                
+                print("the shape of x_samples_ddim is (before)", x_samples_ddim.shape)
+                if not config.model.params.identity:
+                    x_samples_ddim = x_samples_ddim.repeat(1,3,1,1)
                 x_samples_ddim = model.decode_first_stage(samples_ddim)
-
+                print("the shape of x_samples_ddim is (after)", x_samples_ddim.shape)
                 #get the predicted mcep
                 pred_mcep = x_samples_ddim[0][0] #take the first channel
-                
+                print("the shape of pred_mcep is", pred_mcep.shape)
                 #turn the predicted mcep to sp
                 save_pred_audios(pred_mcep, opt, index=i, uids=uids, output_dir=opt.outdir)
+                if i == 10:
+                    break
 
 
 

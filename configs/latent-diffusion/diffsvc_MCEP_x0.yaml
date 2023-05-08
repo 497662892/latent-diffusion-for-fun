@@ -2,6 +2,7 @@ model:
   base_learning_rate: 1.0e-05
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
+    parameterization: x0
     identity: True
     linear_start: 0.0015
     linear_end: 0.0205
@@ -24,16 +25,15 @@ model:
         lr_max: 0.1
         lr_min: 0.00001
     unet_config:  #改成transformer的
-      target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
+      target: ldm.modules.diffusionmodules.openaimodel.DiffNet
       params:
         in_channels: 40  #the dimension of the latent space (from 40 to 10)
         out_channels: 40
-        num_blocks: 3
+        num_blocks: 6
         emb_channels: 256 #the dimension of the embedding space
-        dropout: 0.1
-        dims: 1
-        num_heads: 8
-        use_new_attention_order: True
+        dilation_cycle_length: 4
+        use_attention: False
+
     first_stage_config:
       target: ldm.models.autoencoder.IdentityFirstStage
     cond_stage_config: __is_first_stage__
@@ -42,7 +42,7 @@ model:
 data:
   target: main.DataModuleFromConfig
   params:
-      batch_size: 32
+      batch_size: 64
       wrap: False
       num_workers: 0
       train:

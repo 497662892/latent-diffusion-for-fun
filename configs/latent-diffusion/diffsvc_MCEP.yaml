@@ -10,7 +10,7 @@ model:
     loss_type: l1
     first_stage_key: singingvoice
     cond_stage_key: features
-    image_size: [200,10]  #change from a number into a list
+    image_size: [800,40]  #change from a number into a list
     channels: 1 #only 1 for audio
     concat_mode: False #using cross attention
     monitor: val/loss

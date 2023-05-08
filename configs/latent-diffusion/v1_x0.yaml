@@ -2,7 +2,7 @@ model:
   base_learning_rate: 1.0e-05
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
-    identity: True
+    parameterization: x0
     linear_start: 0.0015
     linear_end: 0.0205
     log_every_t: 100
@@ -10,7 +10,7 @@ model:
     loss_type: l1
     first_stage_key: singingvoice
     cond_stage_key: features
-    image_size: [800,40]  #change from a number into a list
+    image_size: [200,10]  #change from a number into a list
     channels: 1 #only 1 for audio
     concat_mode: False #using cross attention
     monitor: val/loss
@@ -26,8 +26,8 @@ model:
     unet_config:  #改成transformer的
       target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
       params:
-        in_channels: 40  #the dimension of the latent space (from 40 to 10)
-        out_channels: 40
+        in_channels: 10  #the dimension of the latent space (from 40 to 10)
+        out_channels: 10
         num_blocks: 3
         emb_channels: 256 #the dimension of the embedding space
         dropout: 0.1
@@ -35,14 +35,36 @@ model:
         num_heads: 8
         use_new_attention_order: True
     first_stage_config:
-      target: ldm.models.autoencoder.IdentityFirstStage
+      target: ldm.models.autoencoder.VQModelInterface
+      params:
+        embed_dim: 3
+        n_embed: 8192
+        monitor: val/rec_loss
+        ckpt_path: "pretrain/first_stage/vq-f4/model.ckpt" #the path of the first stage model
+        ddconfig:
+          attn_type: none
+          double_z: false
+          z_channels: 3
+          resolution: 40 #no used
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult:
+          - 1
+          - 2
+          - 4
+          num_res_blocks: 2
+          attn_resolutions: []
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
     cond_stage_config: __is_first_stage__
 
 
 data:
   target: main.DataModuleFromConfig
   params:
-      batch_size: 32
+      batch_size: 64
       wrap: False
       num_workers: 0
       train:

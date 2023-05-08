@@ -37,30 +37,3 @@ model:
     first_stage_config:
       target: ldm.models.autoencoder.IdentityFirstStage
     cond_stage_config: __is_first_stage__
-
-
-data:
-  target: main.DataModuleFromConfig
-  params:
-      batch_size: 32
-      wrap: False
-      num_workers: 0
-      train:
-          target: ldm.data.singvoice.SingVoice
-          params:
-              data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
-              dataset_type: train
-              dataset: Opencpop
-      validation:
-          target: ldm.data.singvoice.SingVoice
-          params:
-              data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
-              dataset_type: test
-              dataset: Opencpop
-
-lightning:
-  trainer:
-    max_epochs: 200
-    num_nodes: 1
-    accelerator: 'gpu'
-    gpus: "0"
