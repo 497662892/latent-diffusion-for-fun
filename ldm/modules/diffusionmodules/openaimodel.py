@@ -9,7 +9,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.cpp_extension
 import torch.backends.cudnn
-
 from ldm.modules.diffusionmodules.util import (
     checkpoint,
     conv_nd,
@@ -963,66 +962,6 @@ class EncoderUNetModel(nn.Module):
             h = h.type(x.dtype)
             return self.out(h)
 
-# class TransformerEncoderBlock(TimestepBlock):
-#     """
-#     A transformer encoder block that applies a self-attention mechanism followed
-#     by a feedforward neural network.
-#     :param channels: the number of input channels.
-#     :param emb_channels: the number of timestep embedding channels.
-#     :param dropout: the rate of dropout.
-#     :param use_checkpoint: if True, use gradient checkpointing on this module.
-#     :param dims: determines if the signal is 1D, 2D, or 3D.
-#     :param num_heads: the number of attention heads to use.
-#     :param num_head_channels: if specified, the number of channels per attention head.
-#     :param use_new_attention_order: if True, use a new attention order.
-#     """
-
-#     def __init__(
-#         self,
-#         channels,
-#         emb_channels,
-#         dropout,
-#         use_checkpoint=False,
-#         dims=2,
-#         num_heads=1,
-#         num_head_channels=-1,
-#         use_new_attention_order=False,
-#     ):
-#         super().__init__()
-#         self.channels = channels
-#         self.emb_channels = emb_channels
-#         self.dropout = dropout
-#         self.use_checkpoint = use_checkpoint
-#         self.dims = dims
-#         self.num_heads = num_heads
-#         self.num_head_channels = num_head_channels
-#         self.use_new_attention_order = use_new_attention_order
-
-#         self.norm1 = normalization(channels)
-#         self.attn_block = AttentionBlock(
-#             channels,
-#             num_heads=num_heads,
-#             num_head_channels=num_head_channels,
-#             use_checkpoint=use_checkpoint,
-#             use_new_attention_order=use_new_attention_order,
-#         )
-#         self.norm2 = normalization(channels)
-#         self.mlp = nn.Sequential(
-#             conv_nd(dims, channels, channels * 4, 1),
-#             nn.GELU(),
-#             conv_nd(dims, channels * 4, channels, 1),
-#             nn.Dropout(dropout),
-#         )
-#         self.proj_out = zero_module(conv_nd(dims, channels, channels, 1))
-
-#     def forward(self, x, timestep_embedding):
-#         x = x + timestep_embedding[:, :, None, None, None]  # add timestep embedding
-#         x = self.norm1(x)
-#         x = x + self.attn_block(x)
-#         x = x + self.mlp(self.norm2(x))
-#         return self.proj_out(x)
-
-
 
 class TransformerDecoderBlock(TimestepBlock):
     """
@@ -1076,7 +1015,7 @@ class TransformerDecoderBlock(TimestepBlock):
             nn.Dropout(p=dropout),
             nn.Linear(emb_channels, emb_channels),
         )
-            
+        self.pos_encoder = PositionalEncoding(emb_channels, dropout)
         self.decoder = BasicTransformerBlock(dim=emb_channels, n_heads= num_heads, d_head= emb_channels//num_heads, 
                                              dropout=dropout, context_dim=emb_channels, checkpoint = use_checkpoint)
 
@@ -1087,7 +1026,7 @@ class TransformerDecoderBlock(TimestepBlock):
         h = self.in_layer(x) + self.emb_layer(t_emb)  # [B, T, D]
         h = self.out_layer(h)
         x = x + h
-        
+        x = self.pos_encoder(x)
         #apply the attention block
         x = self.decoder(x, cond, mask=mask)
         return x
@@ -1158,23 +1097,20 @@ class TransformerModel(nn.Module):
         self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
 
         self.ppg_proj = nn.Sequential(   #reduce the number of channel of ppg
-            nn.Linear(1024, emb_channels),
+            nn.Linear(1024, 2*emb_channels),
             nn.SiLU(),
-            nn.Linear(emb_channels, emb_channels),
+            nn.Linear(2*emb_channels, emb_channels),
         )
-        # self.ppg_proj = nn.Sequential(
-        #    Transpose(1,2),
-        #    nn.Conv1d(1024, emb_channels, 1),
-        #    nn.SiLU(),
-        #    nn.Conv1d(emb_channels, emb_channels, 1),
-        #    Transpose(1,2)
-        # )
-         
+        
         self.condition_fusion = nn.Sequential(  #fusion of two condition 
-            nn.Linear(emb_channels * 2, emb_channels),
+            nn.Linear(emb_channels * 2, emb_channels * 2),
             nn.SiLU(),
-            nn.Linear(emb_channels, emb_channels),
+            nn.Linear(emb_channels * 2, emb_channels),
         )
+        # self.condition_down = nn.Sequential(
+        #     nn.SiLU(),
+        #     nn.Linear(emb_channels * 2, emb_channels),
+        # )
         
         self.time_embed = nn.Sequential(
             nn.Linear(emb_channels, emb_channels),
@@ -1195,21 +1131,19 @@ class TransformerModel(nn.Module):
         :param encoder_outputs: a list of encoder output tensors.
         :param masks: a list of masks for the decoder blocks.
         """
-
+        
+        
         x = rearrange(x, 'b c t d -> b t (c d)')
-
         
-        x = th.squeeze(x, 1) # remove channel dimension [B, 1, T, D] -> [B, T, D]
-        
-        f0 = th.squeeze(context["f0"]) #remove channel dimension [B, 1, T] -> [B, T]
 
+        f0 = th.squeeze(context["f0"],dim=-1) #remove channel dimension [B, T, 1] -> [B, T]
         
         f0_emb = self.f0_embeding(f0) #from [B, T] to [B, T, emb_channels]
 
         ppg_emb = self.ppg_proj(context["whisper"]) # from [B, T, 1024] to [B, T, emb_channels]
         
         conditions = th.cat([f0_emb, ppg_emb], dim = 2)
-        conditions = self.condition_fusion(conditions)
+        conditions = self.condition_fusion(conditions) 
         
         step_emb = timestep_embedding(t,dim = self.emb_channels)  #get the original timestep embing [B,D] 
         step_emb = th.unsqueeze(step_emb, 1) #turn [B, D] to [B, 1, D]
@@ -1223,9 +1157,9 @@ class TransformerModel(nn.Module):
             x = decoder(x, cond = conditions, t_emb=t_emb , mask=mask)
 
         x = self.output_conv(x)
+        
         c = self.z_channels
         e = self.out_channels//c
-
         x = rearrange(x, 'b t (x y) -> b x t y', x = c, y = e)
 
         return x
@@ -1290,10 +1224,12 @@ class DiffNet(nn.Module):
         self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
 
         self.ppg_proj = nn.Sequential(   #reduce the number of channel of ppg
-            nn.Linear(1024, emb_channels),
+            nn.Linear(1024, emb_channels * 2),
             nn.SiLU(),
-            nn.Linear(emb_channels, emb_channels),
+            nn.Linear(emb_channels * 2, emb_channels),
         )
+        
+        self.pos_embedding = PositionalEncoding(emb_channels, dropout=0.1)
 
         self.residual_layers = nn.ModuleList([
             ResidualBlock(emb_channels, emb_channels, 2 ** (i % dilation_cycle_length))
@@ -1301,7 +1237,8 @@ class DiffNet(nn.Module):
         ])
         
         self.diffusion_projection = nn.Linear(emb_channels, emb_channels)
-        self.condition_transformer = BasicTransformerBlock(dim=emb_channels, n_heads= 8, d_head= emb_channels//8,dropout=0.1, checkpoint = False)
+        
+        self.condition_reduction = nn.Linear(1000,250)
         
         self.skip_projection = Conv1d(emb_channels, emb_channels, 1)
         self.output_projection = Conv1d(emb_channels, out_channels, 1)
@@ -1317,7 +1254,6 @@ class DiffNet(nn.Module):
         """
 
         x = rearrange(x, 'b c t d -> b t (c d)')
-
         
         x = th.transpose(x, 1, 2)  # x [B, M, T]
         x = self.input_projection(x)  # x [B, emb_channels, T]
@@ -1333,15 +1269,12 @@ class DiffNet(nn.Module):
         
         condition = ppg + f0 # [B, T, emb_channels]
         
-        mask = th.transpose(context["mask"], 1, 2) #get the mask from [B, T, 1] to [B, 1, T]
-        
-        if self.use_attention:
-            step_emb_temp = self.diffusion_projection(step_emb).unsqueeze(1) # [B, emb_channels] to [B, 1, emb_channels]
-            temp = th.transpose(x,1,2) + step_emb_temp  #use the noisy input and step as the query of the transformer
-            condition = self.condition_transformer(temp, condition, mask = mask)
-        
-        condition = th.transpose(condition, 1, 2) # [B, T, emb_channels] to [B, emb_channels, T]
-        
+        if self.use_attention: # reduce the number of channel of condition
+            condition = th.transpose(condition, 1, 2) # [B, T, emb_channels] to [B, emb_channels, T]
+            condition = self.condition_reduction(condition)
+        else:
+            condition = th.transpose(condition, 1, 2) # [B, T, emb_channels] to [B, emb_channels, T]
+
         skip = []
         for layer_id, layer in enumerate(self.residual_layers):
             x, skip_connection = layer(x, condition, step_emb)
@@ -1352,9 +1285,33 @@ class DiffNet(nn.Module):
         x = F.relu(x)
         x = self.output_projection(x)  # [B, 10, T]
         x = th.transpose(x, 1, 2)  # [B, T, 10]
+        
         c = self.z_channels
         e = self.out_channels//c
 
         x = rearrange(x, 'b t (x y) -> b x t y', x = c, y = e)
 
         return x
+    
+    
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model)
+        )
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x: th.Tensor) -> th.Tensor:
+        """
+        Args:
+            x: Tensor, shape [seq_len, batch_size, embedding_dim]
+        """
+        x = x + self.pe[: x.size(0)]
+        return self.dropout(x)

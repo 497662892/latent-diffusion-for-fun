@@ -7,11 +7,11 @@ model:
     linear_end: 0.0205
     log_every_t: 100
     timesteps: 1000
-    loss_type: l1
+    loss_type: l2
     first_stage_key: singingvoice
     cond_stage_key: features
     image_size: [800,40]  #change from a number into a list
-    channels: 1 #only 1 for audio
+    channels: 1 #euqal to the number of z_channels
     concat_mode: False #using cross attention
     monitor: val/loss
     scheduler_config:
@@ -26,7 +26,7 @@ model:
     unet_config:  #改成transformer的
       target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
       params:
-        in_channels: 40  #the dimension of the latent space (from 40 to 10)
+        in_channels: 40  
         out_channels: 40
         num_blocks: 3
         emb_channels: 256 #the dimension of the embedding space
@@ -34,6 +34,7 @@ model:
         dims: 1
         num_heads: 8
         use_new_attention_order: True
+        z_channels: 1
     first_stage_config:
       target: ldm.models.autoencoder.IdentityFirstStage
     cond_stage_config: __is_first_stage__

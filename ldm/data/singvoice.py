@@ -16,7 +16,7 @@ import librosa
 import psutil
 
 class SingVoice(Dataset):
-    def __init__(self, data_path, dataset, dataset_type,padding_size = 800):
+    def __init__(self, data_path, dataset, dataset_type,padding_size = 1000):
         # 获取内存使用信息
         memory_info = psutil.virtual_memory()
 
@@ -125,9 +125,9 @@ class SingVoice(Dataset):
         
         whisper_gt[:sz] = torch.as_tensor(whisper[:sz])
         f0_gt[:sz] = torch.as_tensor(f0[:sz])
-        
+        # print("the shape of f0_gt (before)", f0_gt.shape)
         f0_gt = get_bin_index(f0_gt) # convert to bin index
-        
+        # print("the shape of f0_gt", f0_gt.shape)
         sample = {"id":idx, "MCEP":self.y_gt[idx], "mask":self.y_mask[idx], "f0":f0_gt, "whisper":whisper_gt}
         return sample
 

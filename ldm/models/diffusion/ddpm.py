@@ -304,13 +304,16 @@ class DDPM(pl.LightningModule):
         else:
             raise NotImplementedError(f"Paramterization {self.parameterization} not yet supported")
 
+        
         loss = self.get_loss(model_out, target, mean=False).mean(dim=[1, 2, 3])
-
+        
         log_prefix = 'train' if self.training else 'val'
 
         loss_dict.update({f'{log_prefix}/loss_simple': loss.mean()})
         loss_simple = loss.mean() * self.l_simple_weight
-
+        
+        print("this is the loss:", loss_simple)
+        
         loss_vlb = (self.lvlb_weights[t] * loss).mean()
         loss_dict.update({f'{log_prefix}/loss_vlb': loss_vlb})
 
@@ -676,11 +679,11 @@ class LatentDiffusion(DDPM):
         #copy x in channel to get 3 channels
         if not self.identity:
             x = torch.cat([x,x,x],dim=1)
-        
+            
         encoder_posterior = self.encode_first_stage(x)
         z = self.get_first_stage_encoding(encoder_posterior).detach() # [B, 3, T//4, D//4]
         #take the first channel of z
-
+        
         if self.first_stage_key == "singingvoice":
             if mask.shape[1] != z.shape[2]:
                 length = mask.shape[1]
@@ -1043,8 +1046,7 @@ class LatentDiffusion(DDPM):
         if cond.get("mask", None) is not None:
             mask = cond["mask"]
             mask = torch.unsqueeze(mask, 1) # (B, 1, T, 1)
-            mask = mask.repeat(1, 1, 1, x_start.shape[-1]) # (B, 1, T, C)
-
+            mask = mask.repeat(1, x_start.shape[1], 1, x_start.shape[-1]) # (B, c, T, d)
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         model_output = self.apply_model(x_noisy, t, cond)
@@ -1059,11 +1061,9 @@ class LatentDiffusion(DDPM):
         else:
             raise NotImplementedError()
         
-        if mask != None:
-            target = target * mask
-            model_output = model_output * mask
         
-        loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
+        loss_simple = self.get_loss(model_output, target, mean=False)
+        loss_simple = torch.sum(loss_simple * mask) / torch.sum(mask)
         
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
         
@@ -1075,7 +1075,8 @@ class LatentDiffusion(DDPM):
             loss_dict.update({'logvar': self.logvar.data.mean()})
 
         loss = self.l_simple_weight * loss.mean()
-
+        print("this is the loss:", loss)
+        
         loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=(1, 2, 3))
         loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
         loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
@@ -1287,7 +1288,7 @@ class LatentDiffusion(DDPM):
 
 
     @torch.no_grad()
-    def log_images(self, batch, N=8, n_row=4, sample=False, ddim_steps=200, ddim_eta=1., return_keys=None,
+    def log_images(self, batch, N=8, n_row=4, sample=True, ddim_steps=200, ddim_eta=1., return_keys=None,
                    quantize_denoised=False, inpaint=False, plot_denoise_rows=False, plot_progressive_rows=False,
                    plot_diffusion_rows=False, plot_condition = False, **kwargs):
 
@@ -1344,11 +1345,19 @@ class LatentDiffusion(DDPM):
                 samples, z_denoise_row = self.sample_log(cond=c,batch_size=N,ddim=use_ddim,
                                                          ddim_steps=ddim_steps,eta=ddim_eta)
                 # samples, z_denoise_row = self.sample(cond=c, batch_size=N, return_intermediates=True)
-                if samples.shape[1] == 1:
-                    samples = samples.repeat(1, 3, 1, 1)
                 
             x_samples = self.decode_first_stage(samples)
             log["samples"] = x_samples
+            
+            mask = c["mask"]
+            print("the shape of mask is:", mask.shape)
+            mask = torch.unsqueeze(mask, 1) # (B, 1, T, 1)
+            mask = mask.repeat(1, x.shape[1], 1, x.shape[-1]) # (B, c, T, d)
+            print("the shape of mask is:", mask.shape)
+            loss = self.get_loss(x_samples, x, mean=False)
+            loss = torch.sum(loss * mask) / torch.sum(mask)
+            print("the loss is:", loss)
+            
             if plot_denoise_rows:
                 denoise_grid = self._get_denoise_row_from_list(z_denoise_row)
                 log["denoise_row"] = denoise_grid
@@ -1362,8 +1371,6 @@ class LatentDiffusion(DDPM):
                                                              quantize_denoised=True)
                     # samples, z_denoise_row = self.sample(cond=c, batch_size=N, return_intermediates=True,
                     #                                      quantize_denoised=True)
-                    if samples.shape[1] == 1:
-                        samples = samples.repeat(1, 3, 1, 1)
                 x_samples = self.decode_first_stage(samples.to(self.device))
                 log["samples_x0_quantized"] = x_samples
 
