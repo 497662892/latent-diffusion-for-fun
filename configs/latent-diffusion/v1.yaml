@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 1.0e-05
+  base_learning_rate: 1.0e-04
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     linear_start: 0.0015
@@ -19,9 +19,9 @@ model:
         verbosity_interval: 0
         warm_up_steps: 1000
         max_decay_steps: 50000
-        lr_start: 0.001
+        lr_start: 0.0001
         lr_max: 0.1
-        lr_min: 0.00001
+        lr_min: 0.0000001
     unet_config:  #改成transformer的
       target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
       params:
@@ -34,13 +34,14 @@ model:
         num_heads: 8
         use_new_attention_order: True
         z_channels: 3
+        use_transformer_encoder: True
     first_stage_config:
       target: ldm.models.autoencoder.VQModelInterface
       params:
         embed_dim: 3
         n_embed: 8192
         monitor: val/rec_loss
-        ckpt_path: "pretrain/first_stage/vq-f4/model.ckpt" #the path of the first stage model
+        ckpt_path: "pretrain/first_stage/vq-f4/last.ckpt" #the path of the first stage model
         ddconfig:
           attn_type: none
           double_z: false
@@ -64,7 +65,7 @@ model:
 data:
   target: main.DataModuleFromConfig
   params:
-      batch_size: 64
+      batch_size: 32
       wrap: False
       num_workers: 0
       train:
@@ -82,7 +83,7 @@ data:
 
 lightning:
   trainer:
-    max_epochs: 200
+    max_epochs: 300
     num_nodes: 1
     accelerator: 'gpu'
     gpus: "0"

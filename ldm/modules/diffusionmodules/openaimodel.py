@@ -20,7 +20,8 @@ from ldm.modules.diffusionmodules.util import (
 )
 from ldm.modules.attention import SpatialTransformer, BasicTransformerBlock
 import os
-
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from torchvision.transforms import Resize
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 # dummy replace
@@ -1068,11 +1069,13 @@ class TransformerModel(nn.Module):
         num_heads=1,
         num_head_channels=-1,
         use_new_attention_order=False,
-        z_channels = 1
+        z_channels = 1,
+        use_transformer_encoder = False
     ):
         super().__init__()
 
         # Decoder blocks
+        self.use_transformer_encoder = use_transformer_encoder
         self.z_channels = z_channels
         self.decoders = nn.ModuleList()
         for i in range(num_blocks):
@@ -1094,23 +1097,31 @@ class TransformerModel(nn.Module):
             nn.Linear(emb_channels, out_channels),
         )
         # encoder for conditions
-        self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
+        self.f0_embeding = nn.Sequential(
+            nn.Embedding(300, emb_channels),  #emb the f0 into [B,T,D]
+            nn.LayerNorm(emb_channels),
+        )
 
         self.ppg_proj = nn.Sequential(   #reduce the number of channel of ppg
-            nn.Linear(1024, 2*emb_channels),
+            nn.LayerNorm(1024),
+            nn.Linear(1024, emb_channels),
             nn.SiLU(),
-            nn.Linear(2*emb_channels, emb_channels),
         )
         
+        self.norm0 = nn.LayerNorm(emb_channels * 2)
+        
         self.condition_fusion = nn.Sequential(  #fusion of two condition 
-            nn.Linear(emb_channels * 2, emb_channels * 2),
-            nn.SiLU(),
             nn.Linear(emb_channels * 2, emb_channels),
+            nn.SiLU(),
+            nn.LayerNorm(emb_channels),
         )
-        # self.condition_down = nn.Sequential(
-        #     nn.SiLU(),
-        #     nn.Linear(emb_channels * 2, emb_channels),
-        # )
+        
+        encoder_layers = TransformerEncoderLayer(
+            emb_channels * 2,  8 , dropout=dropout, batch_first=True
+        )
+        self.transformer_encoder = TransformerEncoder(encoder_layers, 1)
+
+        self.mlp = nn.Linear(emb_channels * 2, emb_channels)
         
         self.time_embed = nn.Sequential(
             nn.Linear(emb_channels, emb_channels),
@@ -1143,7 +1154,22 @@ class TransformerModel(nn.Module):
         ppg_emb = self.ppg_proj(context["whisper"]) # from [B, T, 1024] to [B, T, emb_channels]
         
         conditions = th.cat([f0_emb, ppg_emb], dim = 2)
-        conditions = self.condition_fusion(conditions) 
+        mask = context["mask"]
+        if self.use_transformer_encoder:  #whether using transformer encoder to deal with the condition
+            if self.z_channels == 1:
+                # take the inverse of the mask
+                mask = torch.squeeze(mask, dim = 2)
+                patch = (~mask)
+            else:
+                patch = Resize((1000,1))(mask)
+                patch = torch.squeeze(patch,dim=2)
+                patch = (~patch)
+            conditions = PositionalEncoding(self.emb_channels * 2, dropout=0.1)(conditions)
+            conditions = self.norm0(conditions)
+            conditions = self.transformer_encoder(conditions, src_key_padding_mask = patch)
+            conditions = self.mlp(conditions)
+        else:
+            conditions = self.condition_fusion(conditions)
         
         step_emb = timestep_embedding(t,dim = self.emb_channels)  #get the original timestep embing [B,D] 
         step_emb = th.unsqueeze(step_emb, 1) #turn [B, D] to [B, 1, D]
@@ -1221,13 +1247,19 @@ class DiffNet(nn.Module):
             nn.Linear(dim * 4, dim)
         )
         
-        self.f0_embeding = nn.Embedding(300, emb_channels)  #emb the f0 into [B,T,D]
+        self.f0_embeding = nn.Sequential(
+            nn.Embedding(300, emb_channels),  #emb the f0 into [B,T,D]
+            nn.LayerNorm(emb_channels),
+        )
 
         self.ppg_proj = nn.Sequential(   #reduce the number of channel of ppg
+            nn.LayerNorm(1024),
             nn.Linear(1024, emb_channels * 2),
             nn.SiLU(),
             nn.Linear(emb_channels * 2, emb_channels),
         )
+        
+        self.norm = nn.LayerNorm(emb_channels)
         
         self.pos_embedding = PositionalEncoding(emb_channels, dropout=0.1)
 
@@ -1254,7 +1286,6 @@ class DiffNet(nn.Module):
         """
 
         x = rearrange(x, 'b c t d -> b t (c d)')
-        
         x = th.transpose(x, 1, 2)  # x [B, M, T]
         x = self.input_projection(x)  # x [B, emb_channels, T]
         x = F.relu(x)
@@ -1268,6 +1299,7 @@ class DiffNet(nn.Module):
         f0 = self.f0_embeding(f0)  #[B, T , emb_channels]
         
         condition = ppg + f0 # [B, T, emb_channels]
+        condition = self.norm(condition)
         
         if self.use_attention: # reduce the number of channel of condition
             condition = th.transpose(condition, 1, 2) # [B, T, emb_channels] to [B, emb_channels, T]
@@ -1313,5 +1345,5 @@ class PositionalEncoding(nn.Module):
         Args:
             x: Tensor, shape [seq_len, batch_size, embedding_dim]
         """
-        x = x + self.pe[: x.size(0)]
+        x = x + self.pe[: x.size(0)].to(x.device)
         return self.dropout(x)

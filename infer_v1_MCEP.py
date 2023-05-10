@@ -105,13 +105,13 @@ if __name__ == "__main__":
         "--outdir",
         type=str,
         nargs="?",
-        default='outputs/diffsvc_MCEP',
+        default='outputs/v1_MCEP',
         help="dir to write results to",
     )
     parser.add_argument(
         "--steps",
         type=int,
-        default=200,
+        default=50,
         help="number of ddim sampling steps",
     )
     parser.add_argument(
@@ -124,20 +124,20 @@ if __name__ == "__main__":
     
     data_path = opt.indir
     
-    test_dataset = SingVoice(data_path, opt.dataset, "train") #for debug
+    test_dataset = SingVoice(data_path, opt.dataset, "test") #for debug
     
     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=0)
     
     if opt.dataset == "M4Singer":
         uids,upaths = get_uids(opt.dataset, "test")
     else:
-        uids = get_uids(opt.dataset, "train") #for debug
+        uids = get_uids(opt.dataset, "test") #for debug
         upaths = None
     
-    config = OmegaConf.load("configs/infer/diffsvc_MCEP.yaml")
+    config = OmegaConf.load("configs/infer/v1_MCEP_infer.yaml")
     model = instantiate_from_config(config.model)
     
-    model.load_state_dict(torch.load("logs/2023-05-09T17-30-44_diffsvc_MCEP/checkpoints/last.ckpt")["state_dict"],
+    model.load_state_dict(torch.load("logs/2023-05-09T12-42-39_v1_MCEP/checkpoints/last.ckpt")["state_dict"],
                           strict=False)
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -176,15 +176,17 @@ if __name__ == "__main__":
                 
                 x_samples_ddim = model.decode_first_stage(samples_ddim)
                 #get the predicted mcep
-                pred_mcep = x_samples_ddim[0][0] #take the first channel
+                pred_mcep = torch.mean(x_samples_ddim[0],dim = 0) #take the mean of channels
                 #turn the predicted mcep to sp
-                criterion = nn.MSELoss()
-                loss = criterion(pred_mcep*mask[0],mecp*mask[0])
+                criterion = nn.MSELoss(reduction='none')
+                loss = criterion(pred_mcep,mecp)
+                loss = torch.sum(loss * mask[0]) / torch.sum(mask[0])
                 
                 print("the MSE loss is:", loss)
                 
-                criterion2 = nn.L1Loss()
-                loss2 = criterion2(pred_mcep*mask[0],mecp*mask[0])
+                criterion2 = nn.L1Loss(reduction='none')
+                loss2 = criterion2(pred_mcep,mecp)
+                loss2 = torch.sum(loss2 * mask[0]) / torch.sum(mask[0])
                 print("the L1 loss is:", loss2)
                 
                 save_pred_audios(pred_mcep,mecp.cpu(), opt, index=i, uids=uids,upaths = upaths, output_dir=opt.outdir)

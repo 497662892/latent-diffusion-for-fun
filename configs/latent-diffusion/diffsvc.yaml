@@ -21,13 +21,13 @@ model:
         max_decay_steps: 50000
         lr_start: 0.001
         lr_max: 0.1
-        lr_min: 0.00001
+        lr_min: 0.000001
     unet_config:  #改成transformer的
       target: ldm.modules.diffusionmodules.openaimodel.DiffNet
       params:
         in_channels: 30  #the dimension of the latent space (from 40 to 10 * 3 the number of z_channels)
         out_channels: 30
-        num_blocks: 6
+        num_blocks: 12
         emb_channels: 256 #the dimension of the embedding space
         dilation_cycle_length: 4
         use_attention: True
@@ -39,7 +39,7 @@ model:
         embed_dim: 3
         n_embed: 8192
         monitor: val/rec_loss
-        ckpt_path: "pretrain/first_stage/vq-f4/model.ckpt" #the path of the first stage model
+        ckpt_path: "pretrain/first_stage/vq-f4/last.ckpt" #the path of the first stage model
         ddconfig:
           attn_type: none
           double_z: false
@@ -63,7 +63,7 @@ model:
 data:
   target: main.DataModuleFromConfig
   params:
-      batch_size: 64
+      batch_size: 32
       wrap: False
       num_workers: 0
       train:
@@ -81,7 +81,7 @@ data:
 
 lightning:
   trainer:
-    max_epochs: 200
+    max_epochs: 300
     num_nodes: 1
     accelerator: 'gpu'
     gpus: "0"

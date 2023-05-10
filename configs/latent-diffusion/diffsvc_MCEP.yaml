@@ -20,15 +20,15 @@ model:
         verbosity_interval: 0
         warm_up_steps: 1000
         max_decay_steps: 50000
-        lr_start: 0.001
+        lr_start: 0.0001
         lr_max: 0.1
-        lr_min: 0.00001
+        lr_min: 0.0000001
     unet_config:  #改成transformer的
       target: ldm.modules.diffusionmodules.openaimodel.DiffNet
       params:
         in_channels: 40  #the dimension of the latent space (from 40 to 10)
         out_channels: 40
-        num_blocks: 6
+        num_blocks: 12
         emb_channels: 256 #the dimension of the embedding space
         dilation_cycle_length: 4
         use_attention: False
@@ -60,7 +60,7 @@ data:
 
 lightning:
   trainer:
-    max_epochs: 200
+    max_epochs: 300
     num_nodes: 1
     accelerator: 'gpu'
     gpus: "0"

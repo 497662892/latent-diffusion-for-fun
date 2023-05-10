@@ -312,7 +312,6 @@ class DDPM(pl.LightningModule):
         loss_dict.update({f'{log_prefix}/loss_simple': loss.mean()})
         loss_simple = loss.mean() * self.l_simple_weight
         
-        print("this is the loss:", loss_simple)
         
         loss_vlb = (self.lvlb_weights[t] * loss).mean()
         loss_dict.update({f'{log_prefix}/loss_vlb': loss_vlb})
@@ -1075,7 +1074,6 @@ class LatentDiffusion(DDPM):
             loss_dict.update({'logvar': self.logvar.data.mean()})
 
         loss = self.l_simple_weight * loss.mean()
-        print("this is the loss:", loss)
         
         loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=(1, 2, 3))
         loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
@@ -1288,7 +1286,7 @@ class LatentDiffusion(DDPM):
 
 
     @torch.no_grad()
-    def log_images(self, batch, N=8, n_row=4, sample=True, ddim_steps=200, ddim_eta=1., return_keys=None,
+    def log_images(self, batch, N=8, n_row=4, sample=True, ddim_steps=50, ddim_eta=1., return_keys=None,
                    quantize_denoised=False, inpaint=False, plot_denoise_rows=False, plot_progressive_rows=False,
                    plot_diffusion_rows=False, plot_condition = False, **kwargs):
 
@@ -1351,12 +1349,19 @@ class LatentDiffusion(DDPM):
             
             mask = c["mask"]
             print("the shape of mask is:", mask.shape)
-            mask = torch.unsqueeze(mask, 1) # (B, 1, T, 1)
-            mask = mask.repeat(1, x.shape[1], 1, x.shape[-1]) # (B, c, T, d)
+            if mask.shape[1] != x.shape[2]:
+                mask = Resize((x.shape[2],1))(mask)
+                # mask = torch.unsqueeze(mask, 1) # (B, 1, T, 1)
             print("the shape of mask is:", mask.shape)
-            loss = self.get_loss(x_samples, x, mean=False)
+            loss = nn.functional.mse_loss(torch.mean(x_samples,dim = 1), torch.mean(x,dim = 1), reduction='none')
+            print("the shape of loss is:", loss.shape)
             loss = torch.sum(loss * mask) / torch.sum(mask)
-            print("the loss is:", loss)
+            print("the loss is for MSE:", loss)
+            
+            loss2 = (torch.mean(x_samples,dim = 1) - torch.mean(x,dim = 1)).abs()
+            print("the shape of loss2 is:", loss2.shape)
+            loss2 = torch.sum(loss2 * mask) / torch.sum(mask)
+            print("the loss is for L1:", loss2)
             
             if plot_denoise_rows:
                 denoise_grid = self._get_denoise_row_from_list(z_denoise_row)
