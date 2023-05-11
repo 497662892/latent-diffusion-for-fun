@@ -120,7 +120,7 @@ if __name__ == "__main__":
         "--outdir",
         type=str,
         nargs="?",
-        default='outputs/v1_MCEP',
+        default='outputs/diffsvc',
         help="dir to write results to",
     )
     parser.add_argument(
@@ -149,10 +149,10 @@ if __name__ == "__main__":
         uids = get_uids(opt.dataset, "test") #for debug
         upaths = None
     
-    config = OmegaConf.load("configs/infer/v1_MCEP.yaml")
+    config = OmegaConf.load("configs/infer/diffsvc.yaml")
     model = instantiate_from_config(config.model)
     
-    model.load_state_dict(torch.load("logs/v1_MCEP/checkpoints/best.ckpt")["state_dict"],
+    model.load_state_dict(torch.load("logs/diffsvc/checkpoints/best.ckpt")["state_dict"],
                           strict=False)
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")

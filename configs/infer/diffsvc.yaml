@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 0.0001
+  base_learning_rate: 1.0e-05
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     identity: False
@@ -22,22 +22,19 @@ model:
         verbosity_interval: 0
         warm_up_steps: 1000
         max_decay_steps: 50000
-        lr_start: 0.0001
+        lr_start: 0.001
         lr_max: 0.1
-        lr_min: 1.0e-07
+        lr_min: 1.0e-06
     unet_config:
-      target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
+      target: ldm.modules.diffusionmodules.openaimodel.DiffNet
       params:
         in_channels: 30
         out_channels: 30
-        num_blocks: 3
+        num_blocks: 12
         emb_channels: 256
-        dropout: 0.1
-        dims: 1
-        num_heads: 8
-        use_new_attention_order: true
+        dilation_cycle_length: 4
+        use_attention: true
         z_channels: 3
-        use_transformer_encoder: true
     first_stage_config:
       target: ldm.models.autoencoder.VQModelInterface
       params:

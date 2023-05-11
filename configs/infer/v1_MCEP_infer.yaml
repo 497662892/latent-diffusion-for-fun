@@ -1,8 +1,8 @@
 model:
-  base_learning_rate: 1.0e-05
+  base_learning_rate: 0.0002
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
-    identity: True
+    identity: true
     linear_start: 0.0015
     linear_end: 0.0205
     log_every_t: 100
@@ -10,9 +10,11 @@ model:
     loss_type: l2
     first_stage_key: singingvoice
     cond_stage_key: features
-    image_size: [800,40]  #change from a number into a list
-    channels: 1 #euqal to the number of z_channels
-    concat_mode: False #using cross attention
+    image_size:
+    - 1000
+    - 40
+    channels: 1
+    concat_mode: false
     monitor: val/loss
     scheduler_config:
       target: ldm.lr_scheduler.LambdaWarmUpCosineScheduler
@@ -20,21 +22,40 @@ model:
         verbosity_interval: 0
         warm_up_steps: 1000
         max_decay_steps: 50000
-        lr_start: 0.001
+        lr_start: 0.0001
         lr_max: 0.1
-        lr_min: 0.00001
-    unet_config:  #改成transformer的
+        lr_min: 1.0e-06
+    unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
       params:
-        in_channels: 40  
+        in_channels: 40
         out_channels: 40
         num_blocks: 3
-        emb_channels: 256 #the dimension of the embedding space
+        emb_channels: 256
         dropout: 0.1
         dims: 1
         num_heads: 8
-        use_new_attention_order: True
+        use_new_attention_order: true
         z_channels: 1
+        use_transformer_encoder: true
     first_stage_config:
       target: ldm.models.autoencoder.IdentityFirstStage
     cond_stage_config: __is_first_stage__
+data:
+  target: main.DataModuleFromConfig
+  params:
+    batch_size: 16
+    wrap: false
+    num_workers: 0
+    train:
+      target: ldm.data.singvoice.SingVoice
+      params:
+        data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+        dataset_type: train
+        dataset: Opencpop
+    validation:
+      target: ldm.data.singvoice.SingVoice
+      params:
+        data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+        dataset_type: test
+        dataset: Opencpop

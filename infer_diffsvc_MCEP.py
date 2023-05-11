@@ -19,11 +19,19 @@ from config import data_path, dataset2wavpath
 sys.path.append("../preprocess")
 import extract_sp
 import extract_mcep
-
+import pickle
 #get the input of source audio 
 
 
+def converse_base_f0(target_singer_f0_file, ratio=0.25):
+    # Loading target singer's F0 statistics
+    with open(target_singer_f0_file, "rb") as f:
+        mean, total_f0 = pickle.load(f)
 
+    total_f0.sort()
+    base = total_f0[int(len(total_f0) * ratio)]
+    print("Target: mean = {}, ratio = {}, base = {}".format(mean, ratio, base))
+    return base
 
 def get_uids(dataset, dataset_type):
     dataset_file = os.path.join(data_path, dataset, "{}.json".format(dataset_type))
@@ -47,10 +55,9 @@ def save_audio(path, waveform, fs):
 
 
 def save_pred_audios(
-    pred,mecp_get, args, index, uids, output_dir, upaths = None):
+    pred, args, index, uids, output_dir, target_base_f0, upaths = None, ratio = 0.5):
     dataset = args.dataset
     wave_dir = dataset2wavpath[dataset]
-
 
     # Predict
     sample_uids = uids[index]
@@ -58,32 +65,40 @@ def save_pred_audios(
         sample_upaths = upaths[index]
     else:
         sample_upaths = sample_uids + ".wav"
-
+    
+    
     wave_file = os.path.join(wave_dir, sample_upaths)
     f0, sp, ap, fs = extract_sp.extract_world_features(wave_file)
     frame_len = len(f0)
     pred = pred.cpu()
     mcep = pred[:frame_len]
-    mecp_get = mecp_get[:frame_len]
     print("the shape of mcep is:", mcep.shape)
     sp_pred = extract_mcep.mgc2SP(mcep)
-    sp_get = extract_mcep.mgc2SP(mecp_get)
     print("the shape of sp_pred is:", sp_pred.shape)
     print("the shape of sp is:", sp.shape)
     assert sp.shape == sp_pred.shape
+    
+    # Get transposed f0
+    source_base_f0 = sorted([f for f in f0 if f != 0])
+    source_base_f0 = source_base_f0[int(len(source_base_f0) * ratio)]
+    f0_trans = f0 * (target_base_f0 / source_base_f0)
+    print("File: {}, mapping = {}".format(sample_upaths, target_base_f0 / source_base_f0))
 
     y_gt = extract_sp.world_synthesis(f0, sp, ap, fs)
     y_pred = extract_sp.world_synthesis(f0, sp_pred, ap, fs)
-    y_get = extract_sp.world_synthesis(f0, sp_get, ap, fs)
+    y_pred_trans = extract_sp.world_synthesis(f0_trans, sp_pred, ap, fs)
     # save gt
     gt_file = os.path.join(output_dir, "{}_gt.wav".format(sample_uids))
     os.system("cp {} {}".format(wave_file, gt_file))
+    
     # save WORLD synthesis gt
     world_gt_file = os.path.join(output_dir, "{}_gt_world.wav".format(sample_uids))
     save_audio(world_gt_file, y_gt, fs)
     
-    world_gt_file = os.path.join(output_dir, "{}_get_world.wav".format(sample_uids))
-    save_audio(world_gt_file, y_get, fs)
+    # save WORLD synthesis pred trans
+    world_trans_file = os.path.join(output_dir, "{}_pred_trans_world.wav".format(sample_uids))
+    save_audio(world_trans_file, y_pred_trans, fs)
+    
     # save WORLD synthesis pred
     world_pred_file = os.path.join(
         output_dir,
@@ -146,6 +161,11 @@ if __name__ == "__main__":
 
     os.makedirs(opt.outdir, exist_ok=True)
     
+    target_singer_f0_file = os.path.join(opt.indir, opt.dataset, "F0/test_f0.pkl")
+    ratio = 0.5
+    target_base_f0 = converse_base_f0(target_singer_f0_file, ratio=ratio)
+    
+    
     with torch.no_grad():
         with model.ema_scope():
             for i, cases in enumerate(tqdm(test_dataloader)):
@@ -189,9 +209,7 @@ if __name__ == "__main__":
                 loss2 = torch.sum(loss2 * mask[0]) / torch.sum(mask[0])
                 print("the L1 loss is:", loss2)
                 
-                save_pred_audios(pred_mcep,mecp.cpu(), opt, index=i, uids=uids,upaths = upaths, output_dir=opt.outdir)
-                if i == 5:
-                    break
+                save_pred_audios(pred_mcep, opt, index=i, uids=uids,upaths = upaths, output_dir=opt.outdir,target_base_f0=target_base_f0)
 
 
 
