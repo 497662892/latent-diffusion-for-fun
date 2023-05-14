@@ -16,7 +16,7 @@ import librosa
 import psutil
 
 class SingVoice(Dataset):
-    def __init__(self, data_path, dataset, dataset_type,padding_size = 1000):
+    def __init__(self, data_path, dataset, dataset_type,padding_size = 800):
         # 获取内存使用信息
         memory_info = psutil.virtual_memory()
 
@@ -41,6 +41,8 @@ class SingVoice(Dataset):
         self.loading_data()
         logging.info("\n" + "=" * 20 + "\n")
         self.whisper_dim = self.whisper[0].shape[1]
+        self.first_stage_dim = self.first_stage[0].shape[1]
+        
         print("loading data done")
 
     def loading_whisper(self):
@@ -95,16 +97,31 @@ class SingVoice(Dataset):
             
         logging.info(
             "f0: sz = {}, shape = {}".format(
-                len(self.whisper), self.f0[0].shape
+                len(self.f0), self.f0[0].shape
             )
         )
         
-
+    def loading_first_stage(self):
+        logging.info("Loading first_stage features...")
+        with open(
+            os.path.join(self.dataset_dir, "first_stage/20/{}.npy".format(self.dataset_type)),
+            "rb",
+        ) as f:
+            self.first_stage = np.load(f)
+            
+            
+        logging.info(
+            "first_stage: sz = {}, shape = {}".format(
+                len(self.first_stage), self.first_stage[0].shape
+            )
+        )
+        
     def loading_data(self):
         t = time.time()
         self.loading_MCEP()
         self.loading_whisper()
         self.loading_f0()
+        self.loading_first_stage()
 
         logging.info("Done. It took {:.2f}s".format(time.time() - t))
 
@@ -115,20 +132,25 @@ class SingVoice(Dataset):
         # y_gt, mask = self.get_padding_y_gt(idx)
         whisper = self.whisper[idx]
         f0 = self.f0[idx]
+        first_stage = self.first_stage[idx]
+        
         f0 = f0.reshape(-1,1)
         
         whisper_gt = torch.zeros((self.padding_size, self.whisper_dim), dtype=torch.float)
         f0_gt = torch.zeros((self.padding_size, 1), dtype=torch.float)
+        first_stage_gt = torch.zeros((self.padding_size, self.first_stage_dim), dtype=torch.float)
         
         sz = min(self.padding_size, len(whisper))
         
         
         whisper_gt[:sz] = torch.as_tensor(whisper[:sz])
         f0_gt[:sz] = torch.as_tensor(f0[:sz])
+        first_stage_gt[:sz] = torch.as_tensor(first_stage[:sz])
+        
         # print("the shape of f0_gt (before)", f0_gt.shape)
         f0_gt = get_bin_index(f0_gt) # convert to bin index
         # print("the shape of f0_gt", f0_gt.shape)
-        sample = {"id":idx, "MCEP":self.y_gt[idx], "mask":self.y_mask[idx], "f0":f0_gt, "whisper":whisper_gt}
+        sample = {"id":idx, "MCEP":self.y_gt[idx], "mask":self.y_mask[idx], "f0":f0_gt, "whisper":whisper_gt, "first_stage":first_stage_gt}
         return sample
 
     def get_padding_y_gt(self, idx):

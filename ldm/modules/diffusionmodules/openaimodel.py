@@ -1070,13 +1070,20 @@ class TransformerModel(nn.Module):
         num_head_channels=-1,
         use_new_attention_order=False,
         z_channels = 1,
-        use_transformer_encoder = False
+        use_transformer_encoder = False,
+        residual = True,
+        predict_x0 = True
     ):
         super().__init__()
 
         # Decoder blocks
         self.use_transformer_encoder = use_transformer_encoder
         self.z_channels = z_channels
+        self.residual = residual
+        self.predict_x0 = predict_x0
+        
+        self.initial_conv = nn.Conv2d(in_channels = 2 * z_channels, out_channels= 1 * z_channels, kernel_size = 1)
+        
         self.decoders = nn.ModuleList()
         for i in range(num_blocks):
             self.decoders.append(
@@ -1094,7 +1101,7 @@ class TransformerModel(nn.Module):
         self.emb_channels = emb_channels
         # Output convolutional layer
         self.output_conv = nn.Sequential(
-            nn.Linear(emb_channels, out_channels),
+            nn.Conv1d(emb_channels, out_channels, kernel_size=1)
         )
         # encoder for conditions
         self.f0_embeding = nn.Sequential(
@@ -1121,7 +1128,7 @@ class TransformerModel(nn.Module):
         )
         self.transformer_encoder = TransformerEncoder(encoder_layers, 1)
 
-        self.mlp = nn.Linear(emb_channels * 2, emb_channels)
+        self.cond_conv = nn.Conv1d(emb_channels * 2, emb_channels, 1)
         
         self.time_embed = nn.Sequential(
             nn.Linear(emb_channels, emb_channels),
@@ -1130,8 +1137,9 @@ class TransformerModel(nn.Module):
         )
         
         self.input_proj = nn.Sequential(
-            nn.Linear(in_channels, emb_channels),
+            nn.Conv1d(in_channels, emb_channels, kernel_size=1),
         )
+        
         self.out_channels = out_channels
     
 
@@ -1142,11 +1150,16 @@ class TransformerModel(nn.Module):
         :param encoder_outputs: a list of encoder output tensors.
         :param masks: a list of masks for the decoder blocks.
         """
-        
-        
+        if self.residual:
+            first_stage_pre = context["first_stage_pre"]
+            x = th.cat([x, first_stage_pre], dim = 1)
+            x = self.initial_conv(x)
+            first_stage_pre = rearrange(first_stage_pre, 'b c t d -> b t (c d)')
+            
         x = rearrange(x, 'b c t d -> b t (c d)')
         
 
+        
         f0 = th.squeeze(context["f0"],dim=-1) #remove channel dimension [B, T, 1] -> [B, T]
         
         f0_emb = self.f0_embeding(f0) #from [B, T] to [B, T, emb_channels]
@@ -1161,13 +1174,14 @@ class TransformerModel(nn.Module):
                 mask = torch.squeeze(mask, dim = 2)
                 patch = (~mask)
             else:
-                patch = Resize((1000,1))(mask)
+                patch = Resize((800,1))(mask)
                 patch = torch.squeeze(patch,dim=2)
                 patch = (~patch)
             conditions = PositionalEncoding(self.emb_channels * 2, dropout=0.1)(conditions)
             conditions = self.norm0(conditions)
             conditions = self.transformer_encoder(conditions, src_key_padding_mask = patch)
-            conditions = self.mlp(conditions)
+            conditions = self.cond_conv(th.transpose(conditions, 1, 2))
+            conditions = th.transpose(conditions, 1, 2)
         else:
             conditions = self.condition_fusion(conditions)
         
@@ -1175,17 +1189,24 @@ class TransformerModel(nn.Module):
         step_emb = th.unsqueeze(step_emb, 1) #turn [B, D] to [B, 1, D]
         t_emb = self.time_embed(step_emb)  #update the timestep embeding [B, 1, D] -> [B, 1, D]
 
-        x = self.input_proj(x) #[B, T, D]
+        
+        x = self.input_proj(th.transpose(x,1,2)) #[B, D, T]
+        x = th.transpose(x,1,2) #[B, T, D]
         
         mask = th.transpose(context["mask"], 1, 2) #get the mask from [B, T, 1] to [B, 1, T]
         
         for i, decoder in reversed(list(enumerate(self.decoders))):
             x = decoder(x, cond = conditions, t_emb=t_emb , mask=mask)
 
-        x = self.output_conv(x)
+        x = self.output_conv(th.transpose(x,1,2)) #[B, D, T]
+        x = th.transpose(x,1,2) #[B, T, D]
         
         c = self.z_channels
         e = self.out_channels//c
+        
+        if self.residual and self.predict_x0:
+            x = x + first_stage_pre
+        
         x = rearrange(x, 'b t (x y) -> b x t y', x = c, y = e)
 
         return x
@@ -1228,7 +1249,8 @@ class ResidualBlock(nn.Module):
         return (x + residual) / math.sqrt(2.0), skip
 
 class DiffNet(nn.Module):
-    def __init__(self,in_channels,out_channels, emb_channels, num_blocks,dilation_cycle_length=4, use_attention=True, z_channels = 1):
+    def __init__(self,in_channels,out_channels, emb_channels, num_blocks,dilation_cycle_length=4, use_attention=True, z_channels = 1, 
+                 residual = True, predict_x0 = True):
         super().__init__()
         
         self.in_channels = in_channels
@@ -1240,6 +1262,8 @@ class DiffNet(nn.Module):
         self.z_channels = z_channels
         self.input_projection = Conv1d(in_channels, emb_channels, 1)
         dim = emb_channels
+        self.residual = residual
+        self.predict_x0 = predict_x0
         
         self.mlp = nn.Sequential(
             nn.Linear(dim, dim * 4),
@@ -1270,7 +1294,7 @@ class DiffNet(nn.Module):
         
         self.diffusion_projection = nn.Linear(emb_channels, emb_channels)
         
-        self.condition_reduction = nn.Linear(1000,250)
+        self.condition_reduction = nn.Linear(800,200)
         
         self.skip_projection = Conv1d(emb_channels, emb_channels, 1)
         self.output_projection = Conv1d(emb_channels, out_channels, 1)
@@ -1286,6 +1310,13 @@ class DiffNet(nn.Module):
         """
 
         x = rearrange(x, 'b c t d -> b t (c d)')
+        
+        if self.residual:
+            first_stage_pre = context["first_stage_pre"]
+            first_stage_pre = rearrange(first_stage_pre, 'b c t d -> b t (c d)')
+            x = x + first_stage_pre
+        
+        
         x = th.transpose(x, 1, 2)  # x [B, M, T]
         x = self.input_projection(x)  # x [B, emb_channels, T]
         x = F.relu(x)
@@ -1320,7 +1351,10 @@ class DiffNet(nn.Module):
         
         c = self.z_channels
         e = self.out_channels//c
-
+        
+        if self.residual and self.predict_x0:
+            x = x + first_stage_pre        
+            
         x = rearrange(x, 'b t (x y) -> b x t y', x = c, y = e)
 
         return x

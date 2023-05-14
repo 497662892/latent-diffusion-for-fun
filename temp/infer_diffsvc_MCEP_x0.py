@@ -13,7 +13,7 @@ import random
 from torchvision.transforms import Resize
 import torch.nn as nn
 from ldm.data.singvoice import SingVoice
-
+from ldm.models.diffusion.ddpm import LatentDiffusion
 sys.path.append("../")
 from config import data_path, dataset2wavpath
 sys.path.append("../preprocess")
@@ -23,7 +23,7 @@ import pickle
 #get the input of source audio 
 
 
-def converse_base_f0(target_singer_f0_file, ratio=0.25):
+def converse_base_f0(target_singer_f0_file, ratio=0.7):
     # Loading target singer's F0 statistics
     with open(target_singer_f0_file, "rb") as f:
         mean, total_f0 = pickle.load(f)
@@ -55,7 +55,7 @@ def save_audio(path, waveform, fs):
 
 
 def save_pred_audios(
-    pred, args, index, uids, output_dir, target_base_f0, upaths = None, ratio = 0.5):
+    pred, args, index, uids, output_dir, target_base_f0, upaths = None, ratio = 0.7):
     dataset = args.dataset
     wave_dir = dataset2wavpath[dataset]
 
@@ -76,7 +76,7 @@ def save_pred_audios(
     sp_pred = extract_mcep.mgc2SP(mcep)
     print("the shape of sp_pred is:", sp_pred.shape)
     print("the shape of sp is:", sp.shape)
-    assert sp.shape == sp_pred.shape
+    # assert sp.shape == sp_pred.shape
     
     # Get transposed f0
     source_base_f0 = sorted([f for f in f0 if f != 0])
@@ -120,7 +120,7 @@ if __name__ == "__main__":
         "--outdir",
         type=str,
         nargs="?",
-        default='outputs/diffsvc_MCEP',
+        default='outputs/diffsvc_MCEP_x0',
         help="dir to write results to",
     )
     parser.add_argument(
@@ -149,10 +149,10 @@ if __name__ == "__main__":
         uids = get_uids(opt.dataset, "test") #for debug
         upaths = None
     
-    config = OmegaConf.load("configs/infer/diffsvc_MCEP.yaml")
+    config = OmegaConf.load("configs/infer/diffsvc_MCEP_x0.yaml")
     model = instantiate_from_config(config.model)
-    
-    model.load_state_dict(torch.load("logs/diffsvc_MCEP/checkpoints/epoch=000246.ckpt")["state_dict"],
+
+    model.load_state_dict(torch.load("logs/diffsvc_MCEP_x0/checkpoints/best.ckpt")["state_dict"],
                           strict=False)
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -162,7 +162,7 @@ if __name__ == "__main__":
     os.makedirs(opt.outdir, exist_ok=True)
     
     target_singer_f0_file = os.path.join(opt.indir, opt.dataset, "F0/test_f0.pkl")
-    ratio = 0.5
+    ratio = 0.25
     target_base_f0 = converse_base_f0(target_singer_f0_file, ratio=ratio)
     
     
@@ -171,15 +171,19 @@ if __name__ == "__main__":
             for i, cases in enumerate(tqdm(test_dataloader)):
                 
                 mask, whisper, f0, mecp =  cases["mask"], cases["whisper"], cases["f0"].long(), cases["MCEP"][0].to(device)
+                first_stage_pre = torch.unsqueeze(cases["first_stage"],dim=1)
                 # encode masked image and concat downsampled mask
                 mask = mask.to(device).bool()
                 if not config.model.params.identity:
+                    first_stage_pre = torch.cat([first_stage_pre, first_stage_pre,first_stage_pre], dim=1)
                     mask_post = Resize((mask.shape[1]//4,1))(mask) #downsample mask [B,T//4,1]
                 else:
                     mask_post = mask
                 
+                first_stage_pre = model.encode_first_stage(first_stage_pre)
+                
                 print("the shape of mask_post is:", mask_post.shape)
-                c = {"whisper": whisper.to(device), "f0": f0.to(device), "mask": mask_post.to(device)}
+                c = {"whisper": whisper.to(device), "f0": f0.to(device), "mask": mask_post.to(device),"first_stage_pre":first_stage_pre.to(device) }
                 
                 
                 if not config.model.params.identity:
@@ -188,11 +192,7 @@ if __name__ == "__main__":
                     shape = (1, 1, 1000, 40)
                 
                 #sampling
-                samples_ddim, _ = sampler.sample(S=opt.steps,
-                                                 conditioning=c,
-                                                 batch_size=shape[0],
-                                                 shape=shape[1:],
-                                                 verbose=False, eta=1)
+                samples_ddim, _ = model.sample_log(cond=c, batch_size=shape[0],ddim = False, ddim_steps=opt.steps)
                 
                 x_samples_ddim = model.decode_first_stage(samples_ddim)
                 #get the predicted mcep

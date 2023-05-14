@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 0.0002
+  base_learning_rate: 0.0001
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     identity: true
@@ -24,7 +24,7 @@ model:
         max_decay_steps: 50000
         lr_start: 0.0001
         lr_max: 0.1
-        lr_min: 1.0e-06
+        lr_min: 1.0e-05
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
       params:
@@ -38,6 +38,7 @@ model:
         use_new_attention_order: true
         z_channels: 1
         use_transformer_encoder: true
+        residual: true #using first stage predition
     first_stage_config:
       target: ldm.models.autoencoder.IdentityFirstStage
     cond_stage_config: __is_first_stage__

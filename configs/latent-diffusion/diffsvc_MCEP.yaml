@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 1.0e-05
+  base_learning_rate: 1.0e-04
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     identity: True
@@ -10,7 +10,7 @@ model:
     loss_type: l2
     first_stage_key: singingvoice
     cond_stage_key: features
-    image_size: [1000,40]  #change from a number into a list
+    image_size: [800,40]  #change from a number into a list
     channels: 1 #only 1 for audio
     concat_mode: False #using cross attention
     monitor: val/loss
@@ -22,7 +22,7 @@ model:
         max_decay_steps: 50000
         lr_start: 0.0001
         lr_max: 0.1
-        lr_min: 0.0000001
+        lr_min: 0.00001
     unet_config:  #改成transformer的
       target: ldm.modules.diffusionmodules.openaimodel.DiffNet
       params:
@@ -33,6 +33,7 @@ model:
         dilation_cycle_length: 4
         use_attention: False
         z_channels: 1
+        predict_x0: False
 
     first_stage_config:
       target: ldm.models.autoencoder.IdentityFirstStage

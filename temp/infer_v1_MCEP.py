@@ -120,7 +120,7 @@ if __name__ == "__main__":
         "--outdir",
         type=str,
         nargs="?",
-        default='outputs/v1',
+        default='outputs/v1_MCEP_val',
         help="dir to write results to",
     )
     parser.add_argument(
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
-        default="M4Singer",
+        default="Opencpop",
         help="the name of the testing dataset",
     )
     opt = parser.parse_args()
@@ -149,10 +149,10 @@ if __name__ == "__main__":
         uids = get_uids(opt.dataset, "test") #for debug
         upaths = None
     
-    config = OmegaConf.load("configs/infer/v1.yaml")
+    config = OmegaConf.load("configs/infer/v1_MCEP.yaml")
     model = instantiate_from_config(config.model)
     
-    model.load_state_dict(torch.load("logs/v1/checkpoints/best.ckpt")["state_dict"],
+    model.load_state_dict(torch.load("logs/v1_MCEP/checkpoints/best.ckpt")["state_dict"],
                           strict=False)
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")

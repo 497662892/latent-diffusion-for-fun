@@ -2,6 +2,7 @@ model:
   base_learning_rate: 1.0e-04
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
+    parameterization: x0
     linear_start: 0.0015
     linear_end: 0.0205
     log_every_t: 100
@@ -35,7 +36,6 @@ model:
         use_new_attention_order: True
         z_channels: 3
         use_transformer_encoder: True
-        predict_x0: False
     first_stage_config:
       target: ldm.models.autoencoder.VQModelInterface
       params:

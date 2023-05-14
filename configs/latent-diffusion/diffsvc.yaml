@@ -9,7 +9,7 @@ model:
     loss_type: l2
     first_stage_key: singingvoice
     cond_stage_key: features
-    image_size: [250,10]  #change from a number into a list
+    image_size: [200,10]  #change from a number into a list
     channels: 3 #euqal to the number of z_channels
     concat_mode: False #using cross attention
     monitor: val/loss
@@ -32,6 +32,7 @@ model:
         dilation_cycle_length: 4
         use_attention: True
         z_channels: 3
+        predict_x0: False
 
     first_stage_config:
       target: ldm.models.autoencoder.VQModelInterface

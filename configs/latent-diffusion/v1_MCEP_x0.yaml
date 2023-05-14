@@ -2,6 +2,8 @@ model:
   base_learning_rate: 1.0e-04
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
+    parameterization: x0
+    identity: True
     linear_start: 0.0015
     linear_end: 0.0205
     log_every_t: 100
@@ -9,8 +11,8 @@ model:
     loss_type: l2
     first_stage_key: singingvoice
     cond_stage_key: features
-    image_size: [200,10]  #change from a number into a list
-    channels: 3 #euqal to the number of z_channels
+    image_size: [800,40]  #change from a number into a list
+    channels: 1 #only 1 for audio
     concat_mode: False #using cross attention
     monitor: val/loss
     scheduler_config:
@@ -21,52 +23,29 @@ model:
         max_decay_steps: 50000
         lr_start: 0.0001
         lr_max: 0.1
-        lr_min: 0.0000001
+        lr_min: 0.00001
     unet_config:  #改成transformer的
       target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
       params:
-        in_channels: 30 #the dimension of the latent space (from 40 to 10 * 3 the number of z_channels)
-        out_channels: 30
+        in_channels: 40  #the dimension of the latent space (from 40 to 10)
+        out_channels: 40
         num_blocks: 3
         emb_channels: 256 #the dimension of the embedding space
         dropout: 0.1
         dims: 1
         num_heads: 8
         use_new_attention_order: True
-        z_channels: 3
+        z_channels: 1
         use_transformer_encoder: True
-        predict_x0: False
     first_stage_config:
-      target: ldm.models.autoencoder.VQModelInterface
-      params:
-        embed_dim: 3
-        n_embed: 8192
-        monitor: val/rec_loss
-        ckpt_path: "pretrain/first_stage/vq-f4/last.ckpt" #the path of the first stage model
-        ddconfig:
-          attn_type: none
-          double_z: false
-          z_channels: 3
-          resolution: 40 #no used
-          in_channels: 3
-          out_ch: 3
-          ch: 128
-          ch_mult:
-          - 1
-          - 2
-          - 4
-          num_res_blocks: 2
-          attn_resolutions: []
-          dropout: 0.0
-        lossconfig:
-          target: torch.nn.Identity
+      target: ldm.models.autoencoder.IdentityFirstStage
     cond_stage_config: __is_first_stage__
 
 
 data:
   target: main.DataModuleFromConfig
   params:
-      batch_size: 32
+      batch_size: 16
       wrap: False
       num_workers: 0
       train:

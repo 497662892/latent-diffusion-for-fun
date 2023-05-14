@@ -10,7 +10,7 @@ model:
     loss_type: l2
     first_stage_key: singingvoice
     cond_stage_key: features
-    image_size: [1000,40]  #change from a number into a list
+    image_size: [800,40]  #change from a number into a list
     channels: 1 #only 1 for audio
     concat_mode: False #using cross attention
     monitor: val/loss
@@ -36,6 +36,7 @@ model:
         use_new_attention_order: True
         z_channels: 1
         use_transformer_encoder: True
+        predict_x0: False
     first_stage_config:
       target: ldm.models.autoencoder.IdentityFirstStage
     cond_stage_config: __is_first_stage__

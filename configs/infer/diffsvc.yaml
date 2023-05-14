@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 1.0e-05
+  base_learning_rate: 1.0e-04
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     identity: False
@@ -24,7 +24,7 @@ model:
         max_decay_steps: 50000
         lr_start: 0.001
         lr_max: 0.1
-        lr_min: 1.0e-06
+        lr_min: 1.0e-05
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.DiffNet
       params:
@@ -35,6 +35,7 @@ model:
         dilation_cycle_length: 4
         use_attention: true
         z_channels: 3
+        residual: true #using first stage predition
     first_stage_config:
       target: ldm.models.autoencoder.VQModelInterface
       params:

@@ -334,16 +334,21 @@ class DDPM(pl.LightningModule):
             mask = batch["mask"]
             whisper = batch["whisper"]
             f0 = batch["f0"]
+            first_stage = batch["first_stage"]
         else:
             x = batch[k]
         if len(x.shape) == 3:
             x = x[..., None]
             x = rearrange(x, 'b h w c -> b c h w')
+            first_stage = first_stage[..., None]
+            first_stage = rearrange(first_stage, 'b h w c -> b c h w')
+
         x = x.to(memory_format=torch.contiguous_format).float()
         mask = mask.to(memory_format=torch.contiguous_format).bool()
         whisper = whisper.to(memory_format=torch.contiguous_format).float()
         f0 = f0.to(memory_format=torch.contiguous_format).long()
-        return x,mask,whisper,f0
+        first_stage_pred = first_stage.to(memory_format=torch.contiguous_format).float()
+        return x,mask,whisper,f0,first_stage_pred
 
     def shared_step(self, batch):
         x = self.get_input(batch, self.first_stage_key)
@@ -668,19 +673,25 @@ class LatentDiffusion(DDPM):
     @torch.no_grad()
     def get_input(self, batch, k, return_first_stage_outputs=False, force_c_encode=False,
                   cond_key=None, return_original_cond=False, bs=None):
-        x,mask,whisper,f0 = super().get_input(batch, k)
+        x,mask,whisper,f0, first_stage_pre = super().get_input(batch, k)
         if bs is not None:
             x = x[:bs]
             mask = mask[:bs]
             whisper = whisper[:bs]
             f0 = f0[:bs]
+            first_stage_pre = first_stage_pre[:bs]
         x = x.to(self.device)
         #copy x in channel to get 3 channels
         if not self.identity:
             x = torch.cat([x,x,x],dim=1)
-            
+            first_stage_pre = torch.cat([first_stage_pre,first_stage_pre,first_stage_pre],dim=1)
+        
         encoder_posterior = self.encode_first_stage(x)
         z = self.get_first_stage_encoding(encoder_posterior).detach() # [B, 3, T//4, D//4]
+        
+        encoder_posterior = self.encode_first_stage(first_stage_pre)
+        first_stage_pre = self.get_first_stage_encoding(encoder_posterior).detach() # [B, 3, T//4, D//4]
+
         #take the first channel of z
         
         if self.first_stage_key == "singingvoice":
@@ -695,7 +706,8 @@ class LatentDiffusion(DDPM):
                 if cond_key in ['caption', 'coordinates_bbox']:
                     xc = batch[cond_key]
                 elif cond_key == 'features':
-                    xc = {"whisper": whisper.to(self.device), "f0": f0.to(self.device), "mask": mask.to(self.device)}
+                    xc = {"whisper": whisper.to(self.device), "f0": f0.to(self.device), "mask": mask.to(self.device),
+                          "first_stage_pre": first_stage_pre.to(self.device)}
                 elif cond_key == 'class_label':
                     xc = batch
                 else:
@@ -1045,7 +1057,7 @@ class LatentDiffusion(DDPM):
         if cond.get("mask", None) is not None:
             mask = cond["mask"]
             mask = torch.unsqueeze(mask, 1) # (B, 1, T, 1)
-            mask = mask.repeat(1, x_start.shape[1], 1, x_start.shape[-1]) # (B, c, T, d)
+            # mask = mask.repeat(1, x_start.shape[1], 1, x_start.shape[-1]) # (B, c, T, d)
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         model_output = self.apply_model(x_noisy, t, cond)
@@ -1286,7 +1298,7 @@ class LatentDiffusion(DDPM):
 
 
     @torch.no_grad()
-    def log_images(self, batch, N=8, n_row=4, sample=True, ddim_steps=50, ddim_eta=1., return_keys=None,
+    def log_images(self, batch, N=8, n_row=4, sample=False, ddim_steps=50, ddim_eta=1., return_keys=None,
                    quantize_denoised=False, inpaint=False, plot_denoise_rows=False, plot_progressive_rows=False,
                    plot_diffusion_rows=False, plot_condition = False, **kwargs):
 
