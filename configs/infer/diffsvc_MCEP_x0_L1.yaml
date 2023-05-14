@@ -1,0 +1,59 @@
+model:
+  base_learning_rate: 0.0001
+  target: ldm.models.diffusion.ddpm.LatentDiffusion
+  params:
+    parameterization: x0
+    identity: true
+    linear_start: 0.0015
+    linear_end: 0.0205
+    log_every_t: 100
+    timesteps: 1000
+    loss_type: l1
+    first_stage_key: singingvoice
+    cond_stage_key: features
+    image_size:
+    - 800
+    - 40
+    channels: 1
+    concat_mode: false
+    monitor: val/loss
+    scheduler_config:
+      target: ldm.lr_scheduler.LambdaWarmUpCosineScheduler
+      params:
+        verbosity_interval: 0
+        warm_up_steps: 1000
+        max_decay_steps: 50000
+        lr_start: 0.0001
+        lr_max: 0.1
+        lr_min: 1.0e-05
+    unet_config:
+      target: ldm.modules.diffusionmodules.openaimodel.DiffNet
+      params:
+        in_channels: 40
+        out_channels: 40
+        num_blocks: 12
+        emb_channels: 256
+        dilation_cycle_length: 4
+        use_attention: false
+        z_channels: 1
+    first_stage_config:
+      target: ldm.models.autoencoder.IdentityFirstStage
+    cond_stage_config: __is_first_stage__
+data:
+  target: main.DataModuleFromConfig
+  params:
+    batch_size: 64
+    wrap: false
+    num_workers: 0
+    train:
+      target: ldm.data.singvoice.SingVoice
+      params:
+        data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+        dataset_type: train
+        dataset: Opencpop
+    validation:
+      target: ldm.data.singvoice.SingVoice
+      params:
+        data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+        dataset_type: test
+        dataset: Opencpop

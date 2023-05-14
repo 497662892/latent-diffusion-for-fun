@@ -1,0 +1,84 @@
+model:
+  base_learning_rate: 0.0001
+  target: ldm.models.diffusion.ddpm.LatentDiffusion
+  params:
+    identity: false
+    parameterization: x0
+    linear_start: 0.0015
+    linear_end: 0.0205
+    log_every_t: 100
+    timesteps: 1000
+    loss_type: l1
+    first_stage_key: singingvoice
+    cond_stage_key: features
+    image_size:
+    - 200
+    - 10
+    channels: 3
+    concat_mode: false
+    monitor: val/loss
+    scheduler_config:
+      target: ldm.lr_scheduler.LambdaWarmUpCosineScheduler
+      params:
+        verbosity_interval: 0
+        warm_up_steps: 1000
+        max_decay_steps: 50000
+        lr_start: 0.0001
+        lr_max: 0.1
+        lr_min: 1.0e-07
+    unet_config:
+      target: ldm.modules.diffusionmodules.openaimodel.TransformerModel
+      params:
+        in_channels: 30
+        out_channels: 30
+        num_blocks: 4
+        emb_channels: 256
+        dropout: 0.1
+        dims: 1
+        num_heads: 8
+        use_new_attention_order: true
+        z_channels: 3
+        use_transformer_encoder: true
+    first_stage_config:
+      target: ldm.models.autoencoder.VQModelInterface
+      params:
+        embed_dim: 3
+        n_embed: 8192
+        monitor: val/rec_loss
+        ckpt_path: pretrain/first_stage/vq-f4/last.ckpt
+        ddconfig:
+          attn_type: none
+          double_z: false
+          z_channels: 3
+          resolution: 40
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult:
+          - 1
+          - 2
+          - 4
+          num_res_blocks: 2
+          attn_resolutions: []
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+    cond_stage_config: __is_first_stage__
+data:
+  target: main.DataModuleFromConfig
+  params:
+    batch_size: 32
+    wrap: false
+    num_workers: 0
+    train:
+      target: ldm.data.singvoice.SingVoice
+      params:
+        data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+        dataset_type: train
+        dataset: Opencpop
+    validation:
+      target: ldm.data.singvoice.SingVoice
+      params:
+        data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+        dataset_type: test
+        dataset: Opencpop

@@ -1,19 +1,21 @@
 model:
-  base_learning_rate: 1.0e-04
+  base_learning_rate: 0.0001
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
-    identity: False
+    identity: false
     parameterization: x0
     linear_start: 0.0015
     linear_end: 0.0205
     log_every_t: 100
     timesteps: 1000
-    loss_type: l2
+    loss_type: l1
     first_stage_key: singingvoice
     cond_stage_key: features
-    image_size: [200,10]  #change from a number into a list
-    channels: 3 #euqal to the number of z_channels
-    concat_mode: False #using cross attention
+    image_size:
+    - 200
+    - 10
+    channels: 3
+    concat_mode: false
     monitor: val/loss
     scheduler_config:
       target: ldm.lr_scheduler.LambdaWarmUpCosineScheduler
@@ -23,30 +25,29 @@ model:
         max_decay_steps: 50000
         lr_start: 0.0001
         lr_max: 0.1
-        lr_min: 0.0000001
-    unet_config:  #改成transformer的
+        lr_min: 1.0e-07
+    unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.DiffNet
       params:
-        in_channels: 30  #the dimension of the latent space (from 40 to 10 * 3 the number of z_channels)
+        in_channels: 30
         out_channels: 30
         num_blocks: 12
-        emb_channels: 256 #the dimension of the embedding space
+        emb_channels: 256
         dilation_cycle_length: 4
-        use_attention: True
+        use_attention: true
         z_channels: 3
-
     first_stage_config:
       target: ldm.models.autoencoder.VQModelInterface
       params:
         embed_dim: 3
         n_embed: 8192
         monitor: val/rec_loss
-        ckpt_path: "pretrain/first_stage/vq-f4/last.ckpt" #the path of the first stage model
+        ckpt_path: pretrain/first_stage/vq-f4/last.ckpt
         ddconfig:
           attn_type: none
           double_z: false
           z_channels: 3
-          resolution: 40 #no used
+          resolution: 40
           in_channels: 3
           out_ch: 3
           ch: 128
@@ -60,30 +61,21 @@ model:
         lossconfig:
           target: torch.nn.Identity
     cond_stage_config: __is_first_stage__
-
-
 data:
   target: main.DataModuleFromConfig
   params:
-      batch_size: 32
-      wrap: False
-      num_workers: 0
-      train:
-          target: ldm.data.singvoice.SingVoice
-          params:
-              data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
-              dataset_type: train
-              dataset: Opencpop
-      validation:
-          target: ldm.data.singvoice.SingVoice
-          params:
-              data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
-              dataset_type: test
-              dataset: Opencpop
-
-lightning:
-  trainer:
-    max_epochs: 300
-    num_nodes: 1
-    accelerator: 'gpu'
-    gpus: "0"
+    batch_size: 32
+    wrap: false
+    num_workers: 0
+    train:
+      target: ldm.data.singvoice.SingVoice
+      params:
+        data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+        dataset_type: train
+        dataset: Opencpop
+    validation:
+      target: ldm.data.singvoice.SingVoice
+      params:
+        data_path: /mntnfs/med_data5/yiwenhu/diffsvc/Singing-Voice-Conversion-BingliangLi/preprocess/
+        dataset_type: test
+        dataset: Opencpop

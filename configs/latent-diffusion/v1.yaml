@@ -2,6 +2,7 @@ model:
   base_learning_rate: 1.0e-04
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
+    identity: False
     linear_start: 0.0015
     linear_end: 0.0205
     log_every_t: 100
